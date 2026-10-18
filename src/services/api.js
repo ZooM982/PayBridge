@@ -69,9 +69,11 @@ const DEMO_DEPOSITS = [
 ]
 
 async function http(path, opts = {}) {
+  // Pas d'auth par cookie ici (aucune session) : envoyer `credentials: 'include'`
+  // oblige le navigateur à exiger `Access-Control-Allow-Credentials: true` sur
+  // chaque réponse cross-origin (Render). Le défaut « same-origin » suffit.
   const res = await fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   })

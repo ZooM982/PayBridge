@@ -8,7 +8,11 @@ gsap.registerPlugin(useGSAP)
 export function useReveal(deps = []) {
   const scope = useRef()
   useGSAP(() => {
-    gsap.from('[data-reveal]', { y: 18, opacity: 0, duration: 0.6, ease: 'power3.out', stagger: 0.06, clearProps: 'all' })
+    // Le conteneur n'existe pas encore (ex. rendu « erreur » avant l'élément scopé) : on sort.
+    if (!scope.current) return
+    const targets = scope.current.querySelectorAll('[data-reveal]')
+    if (!targets.length) return
+    gsap.from(targets, { y: 18, opacity: 0, duration: 0.6, ease: 'power3.out', stagger: 0.06, clearProps: 'all' })
   }, { scope, dependencies: deps })
   return scope
 }
