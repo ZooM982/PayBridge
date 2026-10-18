@@ -5,27 +5,36 @@
  * Mode "api"  → backend Node.js/Express (server/) qui seul détient les clés
  *               Bitnob et signe les requêtes HMAC (https://bitnob.dev).
  *
- * Contrat du backend (implémenté dans server/src/index.js) :
- *   GET  /api/health                      → { ok, mode }
- *   GET  /api/wallet                      → { balance, currency }   ← Bitnob : balances
- *   GET  /api/rates                       → { updatedAt, rates }    ← Bitnob : exchange-rates
- *   GET  /api/banks/:country              → { banks: [{ code, name }] } ← Bitnob : banks/:code
- *   GET  /api/account-lookup?country&accountNumber&bankCode&method
- *                                         → { accountName, isVerified, ... } ← Bitnob : account-lookup
- *   POST /api/quotes                      → { amount, fee, rate, received, expiresAt, quoteId }
- *                                         ← Bitnob : payouts/quotes
- *   POST /api/transfers                   → Transfer (quote + initialize + finalize côté backend,
- *                                           canal : mobile_money | bank | crypto | lightning)
- *   POST /api/addresses/validate          → { valid }          ← Bitnob : addresses/validate
- *   POST /api/lightning/decode            → { amountSat, description, expiresAt, … } ← Bitnob : lightning/decode
- *   POST /api/lightning/invoices          → { paymentRequest, amountSat } ← Bitnob : lightning/invoices (« Recevoir »)
- *   GET  /api/beneficiaries | POST | PUT /:id → Beneficiary(s) multi-canaux
- *   GET  /api/events                      → flux SSE { id, status } (statuts temps réel,
- *                                           remplace le clignotement simulé du prototype)
- *   POST /api/webhooks/bitnob             → webhooks Bitnob relancés au backend
- *   POST /api/customers                    → client Bitnob
- *   GET|POST /api/virtual-accounts         → comptes virtuels NGN
- *   POST /api/virtual-accounts/:id/simulate-deposit → crédit sandbox
+ * ── Mapping des routes ────────────────────────────────────────────────────────
+ * Chaque appel du front proxifie une route Bitnob signée côté serveur ; les clés
+ * ne descendent JAMAIS ici. Colonne 3 = route Bitnob réellement appelée.
+ *
+ *   Front (ce fichier)              Backend (server/)                    Bitnob (HMAC)
+ *   ──────────────────────────────  ───────────────────────────────────  ─────────────────────────────────────
+ *   /bitnob/whoami                  GET  /api/whoami                     GET  /api/whoami
+ *   /wallet                         GET  /api/wallet                     GET  /api/balances  (available_balance)
+ *   /rates                          GET  /api/rates                      GET  /api/exchange-rates?base=USD
+ *   /banks/:country                 GET  /api/banks/:country             GET  /api/payouts/banks/:country
+ *   /account-lookup                 GET  /api/account-lookup             GET  /api/payouts/account-lookup
+ *   /addresses/deposit              GET  /api/addresses/deposit          GET  /api/addresses
+ *   /addresses/validate             POST /api/addresses/validate         POST /api/addresses/validate
+ *   /deposits                       GET  /api/deposits                   GET  /api/transactions (side Credit / DEPOSIT_*)
+ *
+ *   Parcours A — envoi crypto vers une adresse externe :
+ *   /transfers  (canal crypto)      POST /api/transfers                  POST /api/withdrawals
+ *   /transfers/:id                  GET  /api/transfers/:id              GET  /api/transactions/{id|reference}
+ *
+ *   Parcours B — USDC → XOF → Mobile Money :
+ *   /quotes                         POST /api/quotes                     POST /api/payouts/quotes
+ *   /transfers  (canal fiat)        POST /api/transfers                  POST /api/payouts/{quote_id}/initialize
+ *                                                                        POST /api/payouts/{quote_id}/finalize
+ *   /transfers/:id  (suivi)         GET  /api/transfers/:id              GET  /api/payouts/{id}  ou  /api/payouts/reference/{ref}
+ *
+ *   Divers : /beneficiaries (store local), /lightning/* (decode, invoices, pay),
+ *   /virtual-accounts* (comptes NGN), /events (SSE statuts temps réel).
+ *
+ * Note : seuls `completed`/`SETTLED` confirment un envoi ; `/api/transactions` et
+ * `/api/payouts` servent à réconcilier les soldes avant/après un paiement.
  */
 import {
   IS_DEMO, DEMO_TRANSACTIONS, DEMO_BENEFICIARIES, DEMO_WALLET, DEMO_RATES_USD, DEMO_BANKS, DEMO_BANKS_FALLBACK, demoHolder,
@@ -111,11 +120,6 @@ export const api = {
   async simulateVirtualAccountDeposit(id) {
     if (IS_DEMO) throw new Error('La simulation de dépôt est disponible en mode API uniquement.')
     return http(`/virtual-accounts/${encodeURIComponent(id)}/simulate-deposit`, { method: 'POST' })
-  },
-
-  async getVirtualAccountDeposits() {
-    if (IS_DEMO) return []
-    return http('/virtual-account-deposits')
   },
 
   async getWallet() {
