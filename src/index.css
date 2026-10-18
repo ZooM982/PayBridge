@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* ───────────── Design tokens PayBridge Africa ───────────── */
+@theme {
+  --font-sans: "Inter", "Geist", ui-sans-serif, system-ui, sans-serif;
+
+  --color-night: #0B1220;
+  --color-night-800: #121B2E;
+  --color-night-700: #1A2540;
+  --color-night-600: #26324F;
+
+  --color-volt: #00D68F;
+  --color-volt-600: #00B377;
+  --color-volt-50: #E6FBF3;
+
+  --color-mist: #F3F5F7;
+  --color-line: #E4E8EE;
+  --color-ink: #0B1220;
+  --color-ink-soft: #5B6576;
+  --color-ink-mute: #8A93A3;
+
+  --color-warn: #F5A524;
+  --color-warn-50: #FEF6E7;
+  --color-danger: #F04452;
+  --color-danger-50: #FDECEE;
+  --color-info: #3B82F6;
+  --color-info-50: #EBF2FE;
+
+  --radius-card: 1.25rem;
+  --shadow-card: 0 1px 2px rgb(11 18 32 / 0.04), 0 4px 16px -4px rgb(11 18 32 / 0.06);
+  --shadow-pop: 0 12px 40px -8px rgb(11 18 32 / 0.18);
+  --shadow-volt: 0 8px 24px -6px rgb(0 214 143 / 0.45);
+}
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-mist text-ink font-sans; font-feature-settings: "cv11", "ss01"; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--color-volt); outline-offset: 2px; border-radius: 8px; }
+  ::selection { background: rgb(0 214 143 / 0.25); }
+}
+
+@layer components {
+  .card { @apply bg-white rounded-[var(--radius-card)] border border-line shadow-[var(--shadow-card)]; }
+  .label { @apply text-[13px] font-medium text-ink-soft; }
+  .field {
+    @apply w-full h-12 rounded-xl border border-line bg-white px-4 text-[15px] text-ink
+           placeholder:text-ink-mute transition-colors outline-none
+           focus:border-volt focus:ring-4 focus:ring-volt/15;
+  }
+  .field-error { @apply border-danger focus:border-danger focus:ring-danger/15; }
+}
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton { position: relative; overflow: hidden; background: #E9EDF2; }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
