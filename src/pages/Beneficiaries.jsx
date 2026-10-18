@@ -21,17 +21,35 @@ import {
 
 const RECEIVERS = COUNTRIES.filter((c) => !['FR', 'US'].includes(c.code))
 const CRYPTO_CHAINS = ['TRON', 'ETHEREUM', 'BITCOIN']
-/** Opérateurs mobile money proposés (doit rester synchrone avec le <Select>). */
-const MOBILE_PROVIDERS = ['Wave', 'Orange Money', 'MTN MoMo', 'M-Pesa']
+/** Repli local si le pays n'est pas couvert par /api/payouts/supported-countries
+ *  (réseaux Bitnob pour le Sénégal). L'enum réel vient de `getCountryRequirements()`. */
+const FALLBACK_NETWORKS = ['ORANGE', 'FREE', 'EXPRESSO', 'WAVE']
+/** Libellés lisibles des réseaux mobile money Bitnob. */
+const NETWORK_LABELS = {
+  ORANGE: 'Orange Money', FREE: 'Free Money', EXPRESSO: 'Expresso', WAVE: 'Wave',
+  MTN: 'MTN MoMo', TELECEL: 'Telecel Cash', AIRTELTIGO: 'AirtelTigo Money',
+  MOOV: 'Moov Money', MPESA: 'M-Pesa', AIRTEL: 'Airtel Money',
+}
+const networkLabel = (n) => NETWORK_LABELS[String(n ?? '').toUpperCase()] ?? n
+/** Alias lisible → enum Bitnob (les payloads/démo utilisent encore « Wave »…). */
+const NETWORK_ALIASES = {
+  WAVE: 'WAVE', ORANGE: 'ORANGE', 'ORANGE MONEY': 'ORANGE', FREE: 'FREE', 'FREE MONEY': 'FREE',
+  EXPRESSO: 'EXPRESSO', MTN: 'MTN', 'MTN MOMO': 'MTN', MOOV: 'MOOV', 'MOOV MONEY': 'MOOV',
+  'M-PESA': 'MPESA', MPESA: 'MPESA', AIRTEL: 'AIRTEL', 'AIRTEL MONEY': 'AIRTEL',
+  AIRTELTIGO: 'AIRTELTIGO', TELECEL: 'TELECEL',
+}
 /** Canal mobile neuf : l'opérateur par défaut est posé DANS l'état.
- *  Sinon `build.label` reste `undefined` alors que le <Select> affiche « Wave » :
+ *  Sinon `build.label` reste `undefined` alors que le <Select> affiche la 1re option :
  *  l'Account Lookup partait avec un `bankCode` vide et le backend répondait 400. */
-const newMobileBuild = () => ({ kind: 'mobile', label: MOBILE_PROVIDERS[0] })
+const newMobileBuild = () => ({ kind: 'mobile', label: FALLBACK_NETWORKS[0] })
 /** Code opérateur/banque envoyé au lookup — jamais vide, le backend l'exige. */
 const bankCodeOf = (value, fallback) => {
   const code = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '_')
   return code || fallback
 }
+/** bank_code mobile money : alias lisible → enum Bitnob, sinon forme MAJ_UNDERSCORE. */
+const networkCode = (value) =>
+  NETWORK_ALIASES[String(value ?? '').trim().toUpperCase().replace(/\s+/g, ' ')] ?? bankCodeOf(value, 'MOBILE_MONEY')
 /** L'Account Lookup Bitnob n'est exposé que sur certains corridors (NG/GH) : ailleurs
  *  l'API renvoie une erreur de validation. On l'explique au lieu d'afficher la
  *  réponse brute de Bitnob — le canal reste ajoutable sans vérification. */
@@ -84,17 +102,26 @@ function QrShareDrawer({ open, onClose, beneficiary }) {
 }
 
 /** Éditeur d'un canal (onglet mobile / banque / crypto / lightning). */
-function ChannelBuilder({ build, set, banks, check, setCheck }) {
+function ChannelBuilder({ build, set, banks, check, setCheck, req }) {
   const kind = build.kind
+  // Réseaux mobile money + limites min/max viennent du back :
+  // GET /api/payouts/supported-countries/:country (voir getCountryRequirements).
+  const networks = req?.mobile_money?.fields?.find((f) => f.key === 'network')?.options ?? []
+  const options = networks.length ? networks : FALLBACK_NETWORKS
+  const limits = (kind === 'bank' ? req?.bank : req?.mobile_money)?.limits
+  const dial = String(req?.dial_code ?? '').trim()
+  const limitHint = limits
+    ? `Format international ${dial} · limites ${money(Number(limits.min_amount), limits.currency)} – ${money(Number(limits.max_amount), limits.currency)}`
+    : 'Format international ex. +221 77 000 00 00'
   if (kind === 'mobile') return (
     <div className="grid gap-2">
       <Field label="Opérateur" htmlFor="chp">
         <Select id="chp" value={build.label ?? ''} onChange={(e) => set({ ...build, label: e.target.value })}>
-          {MOBILE_PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+          {options.map((n) => <option key={n} value={n}>{networkLabel(n)}</option>)}
         </Select>
       </Field>
-      <Field label="Numéro de téléphone" htmlFor="cha" hint="Format international ex. +221 77 000 00 00">
-        <Input id="cha" value={build.account ?? ''} inputMode="tel" onChange={(e) => set({ ...build, account: e.target.value })} placeholder="+221 77 000 00 00" />
+      <Field label="Numéro de téléphone" htmlFor="cha" hint={limitHint}>
+        <Input id="cha" value={build.account ?? ''} inputMode="tel" onChange={(e) => set({ ...build, account: e.target.value })} placeholder={`${dial} 77 000 00 00`.trim()} />
       </Field>
       <VerifyRow state={check} onVerify={check.onVerify} label="Vérifier" />
     </div>
@@ -110,7 +137,7 @@ function ChannelBuilder({ build, set, banks, check, setCheck }) {
           {banks.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
         </Select>
       </Field>
-      <Field label="Numéro de compte (IBAN / RIB)" htmlFor="chba">
+      <Field label="Numéro de compte (IBAN / RIB)" htmlFor="chba" hint={limits ? `Limites ${money(Number(limits.min_amount), limits.currency)} – ${money(Number(limits.max_amount), limits.currency)}` : undefined}>
         <Input id="chba" value={build.account ?? ''} onChange={(e) => set({ ...build, account: e.target.value })} placeholder="SN08 0000 0000 0000" />
       </Field>
       <VerifyRow state={check} onVerify={check.onVerify} label="Vérifier le titulaire" />
@@ -191,11 +218,29 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
     api.getBanks(ctry).then((r) => setBanks(r.banks ?? [])).catch(() => setBanks([]))
   }, [open, ctry])
 
+  // Réseaux mobile money + limites du pays (GET /api/payouts/supported-countries/:country).
+  const [req, setReq] = useState(null)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    api.getCountryRequirements(ctry)
+      .then((r) => { if (alive) setReq(r) })
+      .catch(() => { if (alive) setReq(null) })
+    return () => { alive = false }
+  }, [open, ctry])
+
+  // Le canal en cours d'édition doit utiliser un opérateur valide pour ce pays.
+  useEffect(() => {
+    const nets = req?.mobile_money?.fields?.find((f) => f.key === 'network')?.options
+    if (!nets?.length) return
+    setBuild((b) => (b.kind === 'mobile' && !nets.includes(b.label) ? { ...b, label: nets[0] } : b))
+  }, [req])
+
   /** Vérification du canal courant selon son rail (Account Lookup / Validate / Decode). */
   const verifyChannel = () => {
     setCheck({ state: 'loading' })
     const task = build.kind === 'mobile'
-      ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: bankCodeOf(build.label, 'MOBILE_MONEY'), method: 'mobile' })
+      ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: networkCode(build.label), method: 'mobile' })
         .then((r) => ({ holder: `Titulaire : ${r.accountName}` }))
       : build.kind === 'bank'
         ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: bankCodeOf(build.bankCode, 'DEFAULT'), method: 'bank' })
@@ -240,7 +285,7 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
       setPasted({ ok: true, message: `Bénéficiaire « ${res.beneficiary.name} » importé avec ${res.beneficiary.channels.length} canal(aux).` })
       return
     }
-    setBuild({ ...res.channel })
+    setBuild({ ...res.channel, ...(res.channel.kind === 'mobile' ? { label: networkCode(res.channel.label) } : {}) })
     if (!channels.length && CHANNEL_KINDS[res.channel.kind]) { /* reste sur le builder pour compléter */ }
     setPasted({ ok: true, message: `Canal détecté : ${CHANNEL_KINDS[res.channel.kind].label}. Complétez puis « Ajouter ce canal ».` })
   }
@@ -332,7 +377,7 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
             ))}
           </div>
           <div className="mt-3">
-            <ChannelBuilder build={build} set={setBuildSafe} banks={banks} check={{ ...check, onVerify: verifyChannel }} setCheck={setCheck} />
+            <ChannelBuilder build={build} set={setBuildSafe} banks={banks} req={req} check={{ ...check, onVerify: verifyChannel }} setCheck={setCheck} />
           </div>
           <Button type="button" size="sm" className="mt-3 w-full" icon={UserPlus} onClick={addChannel}>Ajouter ce canal</Button>
         </div>

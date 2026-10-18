@@ -77,6 +77,29 @@ const DEMO_DEPOSITS = [
   },
 ]
 
+/** Exigences par pays (mode démo) — miroir de la branche simulation du backend. */
+const DEMO_DIAL = { SN: '+221', CI: '+225', GH: '+233', KE: '+254', CM: '+237' }
+const DEMO_NETWORKS = { SN: ['ORANGE', 'FREE', 'EXPRESSO', 'WAVE'], CI: ['ORANGE', 'MTN', 'MOOV'], GH: ['MTN', 'TELECEL', 'AIRTELTIGO'], KE: ['MPESA'] }
+const DEMO_LIMITS = {
+  SN: { min_amount: '100', max_amount: '200000', currency: 'XOF' },
+  CI: { min_amount: '100', max_amount: '200000', currency: 'XOF' },
+  GH: { min_amount: '20', max_amount: '15000', currency: 'GHS' },
+  KE: { min_amount: '20', max_amount: '250000', currency: 'KES' },
+}
+const DEMO_COUNTRY_REQUIREMENTS = Object.fromEntries(Object.entries(DEMO_NETWORKS).map(([code, options]) => [code, {
+  code, source: 'demo', dial_code: DEMO_DIAL[code],
+  mobile_money: {
+    label: 'Mobile Money',
+    limits: DEMO_LIMITS[code] ?? null,
+    lookup_fields: ['account_number', 'network'],
+    fields: [
+      { key: 'account_name', label: 'Nom du titulaire', type: 'text', required: true },
+      { key: 'account_number', label: 'Numéro de téléphone', type: 'text', required: true },
+      { key: 'network', label: 'Opérateur', type: 'select', required: true, options },
+    ],
+  },
+}]))
+
 async function http(path, opts = {}) {
   // Pas d'auth par cookie ici (aucune session) : envoyer `credentials: 'include'`
   // oblige le navigateur à exiger `Access-Control-Allow-Credentials: true` sur
@@ -302,6 +325,18 @@ export const api = {
     if (!IS_DEMO) return http(`/banks/${countryCode}`)
     await wait(200)
     return { banks: DEMO_BANKS[countryCode] ?? DEMO_BANKS_FALLBACK }
+  },
+
+  /**
+   * Exigences d'un pays : par rail (`mobile_money`, `bank`…), les champs requis,
+   * l'enum des opérateurs mobile money (`network`) et les limites min/max.
+   * ← Bitnob GET /api/payouts/supported-countries/:country
+   * → { code, name, dial_code, mobile_money: { label, limits, fields[] }, bank?: … }
+   */
+  async getCountryRequirements(countryCode) {
+    if (!IS_DEMO) return http(`/payouts/supported-countries/${encodeURIComponent(countryCode)}`)
+    await wait(250)
+    return DEMO_COUNTRY_REQUIREMENTS[countryCode] ?? { code: countryCode, source: 'demo' }
   },
 
   /**
