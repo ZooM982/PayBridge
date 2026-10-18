@@ -165,13 +165,13 @@ export default function History() {
                           <p className="font-semibold text-emerald-600">+{money(t.amount, t.currency)}</p>
                         ) : (<>
                           <p className="font-semibold">{money(t.amount, t.sendCurrency)}</p>
-                          <p className="text-[12px] text-ink-mute">→ {money(t.received, t.receiveCurrency)}</p>
+                          {t.received != null && <p className="text-[12px] text-ink-mute">→ {money(t.received, t.receiveCurrency)}</p>}
                         </>)}
                       </td>
                       <td className="px-5 py-4">
                         {inbound
                           ? <span className="rounded-md bg-emerald-50 px-2 py-1 text-[12px] font-semibold text-emerald-700">{t.currency}{t.chain ? ` · ${chainLabel(t.chain)}` : ''}</span>
-                          : <span className="rounded-md bg-mist px-2 py-1 text-[12px] font-semibold">{t.sendCurrency} → {t.receiveCurrency}</span>}
+                          : <span className="rounded-md bg-mist px-2 py-1 text-[12px] font-semibold">{t.sendCurrency}{t.receiveCurrency ? ` → ${t.receiveCurrency}` : ''}</span>}
                       </td>
                       <td className="px-5 py-4"><StatusBadge status={t.status} /></td>
                     </tr>

@@ -11,14 +11,16 @@
  *
  *   Front (ce fichier)              Backend (server/)                    Bitnob (HMAC)
  *   ──────────────────────────────  ───────────────────────────────────  ─────────────────────────────────────
- *   /bitnob/whoami                  GET  /api/whoami                     GET  /api/whoami
- *   /wallet                         GET  /api/wallet                     GET  /api/balances  (available_balance)
+ *   /whoami                         GET  /api/whoami                     GET  /api/whoami
+ *   /bitnob/whoami                  (idem, ancienne route)               GET  /api/whoami
+ *   /balances  → /wallet            GET  /api/balances                   GET  /api/balances  (available_balance)
  *   /rates                          GET  /api/rates                      GET  /api/exchange-rates?base=USD
  *   /banks/:country                 GET  /api/banks/:country             GET  /api/payouts/banks/:country
  *   /account-lookup                 GET  /api/account-lookup             GET  /api/payouts/account-lookup
  *   /addresses/deposit              GET  /api/addresses/deposit          GET  /api/addresses
  *   /addresses/validate             POST /api/addresses/validate         POST /api/addresses/validate
- *   /deposits                       GET  /api/deposits                   GET  /api/transactions (side Credit / DEPOSIT_*)
+ *   /transactions → /deposits       GET  /api/transactions               GET  /api/transactions
+ *                                   (side Credit = reçus, side Debit = envois)
  *
  *   Parcours A — envoi crypto vers une adresse externe :
  *   /transfers  (canal crypto)      POST /api/transfers                  POST /api/withdrawals
@@ -33,13 +35,17 @@
  *   Divers : /beneficiaries (store local), /lightning/* (decode, invoices, pay),
  *   /virtual-accounts* (comptes NGN), /events (SSE statuts temps réel).
  *
+ *   Les paires « A → B » signalent un repli : on appelle A (route Bitnob
+ *   canonique) et, si le backend déployé répond 404, on retente B (ancienne route
+ *   applicative). Le front reste ainsi compatible pendant la migration du back.
+ *
  * Note : seuls `completed`/`SETTLED` confirment un envoi ; `/api/transactions` et
  * `/api/payouts` servent à réconcilier les soldes avant/après un paiement.
  */
 import {
-  IS_DEMO, DEMO_TRANSACTIONS, DEMO_BENEFICIARIES, DEMO_WALLET, DEMO_RATES_USD, DEMO_BANKS, DEMO_BANKS_FALLBACK, demoHolder,
+  IS_DEMO, DEMO_TRANSACTIONS, DEMO_BENEFICIARIES, DEMO_WALLET, DEMO_RATES_USD, DEMO_BANKS, DEMO_BANKS_FALLBACK, DEMO_USER, demoHolder,
 } from '../data/demo'
-import { quote as localQuote, country } from '../lib/format'
+import { quote as localQuote, country, frontStatus, countryOfCurrency } from '../lib/format'
 import { channelsOf, channelTitle, channelAccount, cryptoReceived } from '../lib/channels'
 
 const API = import.meta.env.VITE_API_URL ?? 'https://paybridge-ilvu.onrender.com/api'
@@ -109,8 +115,32 @@ async function http(path, opts = {}) {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   })
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Erreur ${res.status}`)
+  if (!res.ok) {
+    const error = new Error((await res.json().catch(() => ({}))).message ?? `Erreur ${res.status}`)
+    error.status = res.status
+    throw error
+  }
   return res.json()
+}
+
+/**
+ * Essaie plusieurs chemins pour la même donnée : le backend Render bascule vers
+ * les routes Bitnob canoniques (/balances, /transactions…) tout en gardant, selon
+ * les déploiements, les anciennes routes applicatives (/wallet, /deposits…).
+ * Seul un 404 (route absente de cette version) déclenche le repli ; toute autre
+ * erreur remonte telle quelle (un 500 n'est pas un changement de contrat).
+ */
+async function httpFirst(paths, opts = {}) {
+  let lastError
+  for (const path of paths) {
+    try {
+      return await http(path, opts)
+    } catch (e) {
+      lastError = e
+      if (e.status !== 404) throw e
+    }
+  }
+  throw lastError
 }
 
 /** Recomplate un transfert avec les infos de son bénéficiaire quand le backend
@@ -130,10 +160,130 @@ function attachBeneficiaries(transfers, beneficiaries = []) {
   })
 }
 
+/* ── Normalisation des réponses Bitnob ───────────────────────────────────────
+ * GET /api/transactions renvoie les mouvements bruts de Bitnob :
+ *   { transactions: [{ transaction_id, side: 'Credit'|'Debit', type, state,
+ *                      amount (unité mineure), amount_formatted, metadata }] }
+ * On les traduit vers les deux contrats du front : « dépôt reçu » et « envoi ».
+ */
+const MINOR_DECIMALS = { BTC: 8, USDT: 6, USDC: 6 }
+const asList = (payload) => (Array.isArray(payload) ? payload : payload?.transactions ?? payload?.data ?? [])
+
+/** Montant Bitnob (unité mineure) → unité majeure. `amount_formatted` prime. */
+function majorAmount(tx = {}) {
+  const formatted = tx.amount_formatted ?? tx.original_amount_formatted
+  if (formatted) {
+    const parsed = parseFloat(String(formatted).replace(/[^0-9.]/g, ''))
+    if (Number.isFinite(parsed)) return Math.abs(parsed)
+  }
+  const raw = Math.abs(Number(tx.amount ?? tx.original_amount ?? 0))
+  return raw / 10 ** (MINOR_DECIMALS[String(tx.currency ?? '').toUpperCase()] ?? 2)
+}
+
+const typeOf = (t) => String(t?.type ?? '').toUpperCase()
+const isCredit = (t) => t?.side === 'Credit' || Number(t?.amount ?? 0) > 0 || typeOf(t).startsWith('DEPOSIT')
+const isDebit = (t) => !isCredit(t) && (t?.side === 'Debit' || Number(t?.amount ?? 0) < 0 || /PAYOUT|WITHDRAW|TRANSFER/.test(typeOf(t)))
+
+/** Réponse /wallet ou /balances → contrat du front ({ balance, currency, wallets }). */
+function normalizeWallet(raw = {}) {
+  const wallets = (raw.wallets ?? raw.accounts ?? [])
+    .map((w) => {
+      const currency = String(w.currency ?? '').toUpperCase()
+      const formatted = w.available_balance_formatted ?? w.balance_formatted
+      const parsed = formatted ? parseFloat(String(formatted).replace(/[^0-9.]/g, '')) : NaN
+      const minor = Number(w.available_balance ?? w.ledger_balance ?? 0) || 0
+      const balance = Number.isFinite(Number(w.balance)) ? Number(w.balance)
+        : Number.isFinite(parsed) ? parsed
+        : minor / 10 ** (MINOR_DECIMALS[currency] ?? 1)
+      return { currency, balance, label: w.label ?? w.description ?? `Portefeuille ${currency}` }
+    })
+    .filter((w) => w.currency)
+  const primary = wallets.find((w) => ['USDC', 'USDT', 'USD'].includes(w.currency)) ?? wallets[0]
+  return {
+    balance: Number(raw.balance ?? primary?.balance ?? 0) || 0,
+    currency: String(raw.currency ?? primary?.currency ?? 'USD').toUpperCase(),
+    wallets,
+  }
+}
+
+/** Réponse /transactions ou /deposits → dépôts reçus (contrat du front). */
+function depositsOf(payload) {
+  const list = asList(payload)
+  // Ancienne route /deposits : les entrées sont déjà au contrat du front.
+  if (list.length && list.every((t) => t?.direction)) return list
+  return list.filter(isCredit).map((t) => {
+    const meta = t.metadata ?? {}
+    return {
+      id: String(t.transaction_id ?? t.id ?? t.reference ?? meta.reference ?? ''),
+      reference: t.reference ?? meta.reference ?? null,
+      direction: 'in',
+      amount: majorAmount(t),
+      currency: String(t.currency ?? '').toUpperCase(),
+      status: frontStatus(t.state),
+      type: t.type ?? 'DEPOSIT',
+      chain: meta.chain ?? null,
+      address: meta.address ?? null,
+      fromAddress: meta.from_address ?? null,
+      txHash: meta.tx_hash ?? null,
+      source: 'bitnob',
+      createdAt: t.created_at ?? meta.detected_at ?? null,
+    }
+  })
+}
+
+/** Réponse /transactions → envois (débits) au contrat du front. */
+function transfersOf(payload) {
+  return asList(payload).filter(isDebit).map((t) => {
+    const meta = t.metadata ?? {}
+    const currency = String(t.currency ?? '').toUpperCase()
+    const receiveCurrency = String(meta.to_currency ?? '').toUpperCase() || null
+    return {
+      id: String(t.transaction_id ?? t.id ?? t.reference ?? ''),
+      reference: t.reference ?? meta.reference ?? null,
+      createdAt: t.created_at ?? meta.settled_at ?? null,
+      beneficiaryId: null,
+      beneficiaryName: null,
+      // Bitnob ne dit pas d'où part le paiement : c'est toujours le compte
+      // PayBridge (Sénégal), comme partout ailleurs dans l'app.
+      fromCountry: DEMO_USER.country,
+      toCountry: countryOfCurrency(receiveCurrency)?.code ?? null,
+      sendCurrency: currency,
+      receiveCurrency,
+      amount: majorAmount(t),
+      fee: majorAmount({ amount: t.fee, amount_formatted: t.fee_formatted, currency }),
+      rate: null,
+      received: null,
+      method: meta.address ? 'crypto' : 'mobile',
+      provider: 'Bitnob',
+      bitnobType: t.type ?? null,
+      bitnobStatus: t.state ?? null,
+      status: frontStatus(t.state),
+      source: 'bitnob',
+    }
+  })
+}
+
+/**
+ * GET /api/rates peut renvoyer `rates: {}` accompagné de `rateDetails[]`
+ * (réponse Bitnob brute). On reconstitue la table « 1 USD = X devise » :
+ * `sell_rate` est le taux appliqué aux payouts, `buy_rate` sert de repli.
+ */
+function normalizeRates(raw = {}) {
+  const rates = { ...(raw.rates ?? {}) }
+  for (const d of raw.rateDetails ?? []) {
+    const currency = String(d.target_currency ?? '').toUpperCase()
+    if (!currency || rates[currency] != null) continue
+    const value = Number(d.sell_rate ?? d.buy_rate ?? d.rate)
+    if (Number.isFinite(value) && value > 0) rates[currency] = value
+  }
+  if (rates.USD == null) rates.USD = 1
+  return { ...raw, rates }
+}
+
 export const api = {
   /** Vérifie l'état de la connexion Bitnob Sandbox via Render */
   async getWhoami() {
-    return http('/bitnob/whoami')
+    return httpFirst(['/whoami', '/bitnob/whoami'])
   },
 
   /** Client Bitnob. Un compte virtuel NGN exige ensuite un BVN nigérian valide. */
@@ -162,24 +312,33 @@ export const api = {
     return http(`/virtual-accounts/${encodeURIComponent(id)}/simulate-deposit`, { method: 'POST' })
   },
 
+  /** Solde du compte Bitnob : GET /api/balances (canonique), sinon /api/wallet. */
   async getWallet() {
-    if (!IS_DEMO) return http('/wallet')
+    if (!IS_DEMO) return normalizeWallet(await httpFirst(['/balances', '/wallet']))
     await wait(500)
     return { balance: DEMO_WALLET.balanceUsd, currency: DEMO_WALLET.currency }
   },
 
+  /**
+   * Envois. Source canonique : GET /api/transactions (les débits = nos sorties
+   * d'argent, avec leur état Bitnob réel). Repli sur /api/transfers pour les
+   * versions du backend qui n'exposent pas encore /transactions.
+   */
   async getTransfers() {
-    if (!IS_DEMO) {
-      // Certaines versions du backend renvoient des transferts sans nom/pays de
-      // bénéficiaire : on recomplète depuis /beneficiaries avant de rendre la main.
-      const [transfers, beneficiaries] = await Promise.all([
-        http('/transfers'),
-        http('/beneficiaries').catch(() => []),
-      ])
-      return attachBeneficiaries(transfers, beneficiaries)
+    if (IS_DEMO) {
+      await wait(650)
+      return structuredClone(DEMO_TRANSACTIONS)
     }
-    await wait(650)
-    return structuredClone(DEMO_TRANSACTIONS)
+    const [beneficiaries, legacy] = await Promise.all([
+      http('/beneficiaries').catch(() => []),
+      http('/transactions').then(
+        (payload) => ({ transactions: transfersOf(payload) }),
+        (e) => (e.status === 404 ? null : Promise.reject(e)),
+      ),
+    ])
+    if (legacy) return attachBeneficiaries(legacy.transactions, beneficiaries)
+    // Ancienne version du backend : liste d'objets transfert propres à l'app.
+    return attachBeneficiaries(await http('/transfers'), beneficiaries)
   },
 
   async getTransfer(id) {
@@ -190,9 +349,9 @@ export const api = {
     return structuredClone(tx)
   },
 
-  /** Opérations REÇUES : dépôts on-chain (Bitnob) + comptes virtuels NGN. */
+  /** Opérations REÇUES : crédits de GET /api/transactions (canonique), sinon /api/deposits. */
   async getDeposits() {
-    if (!IS_DEMO) return http('/deposits')
+    if (!IS_DEMO) return depositsOf(await httpFirst(['/transactions', '/deposits']))
     await wait(550)
     return structuredClone(DEMO_DEPOSITS)
   },
@@ -340,7 +499,7 @@ export const api = {
 
   /** Taux du jour : { updatedAt, rates: { USD: 1, NGN: 1548, … } }. */
   async getRates() {
-    if (!IS_DEMO) return http('/rates')
+    if (!IS_DEMO) return normalizeRates(await http('/rates'))
     await wait(250)
     return { updatedAt: new Date().toISOString(), source: 'demo', rates: { ...DEMO_RATES_USD } }
   },

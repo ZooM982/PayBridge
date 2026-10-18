@@ -19,12 +19,19 @@ export function AppStoreProvider({ children }) {
     setLoading(true)
     setError(null)
     try {
+      // Chaque source est tolérante : une route absente/indisponible (le backend
+      // Render migre vers les routes Bitnob) ne doit pas vider tout le tableau de bord.
       const [w, t, b, d] = await Promise.all([
-        api.getWallet(), api.getTransfers(), api.getBeneficiaries(), api.getDeposits().catch(() => []),
+        api.getWallet().catch(() => null),
+        api.getTransfers().catch(() => []),
+        api.getBeneficiaries().catch(() => []),
+        api.getDeposits().catch(() => []),
       ])
-      setWallet(w); setTransfers(t); setBeneficiaries(b); setDeposits(d)
-    } catch (e) {
-      setError(e.message)
+      setWallet(w)
+      setTransfers(Array.isArray(t) ? t : [])
+      setBeneficiaries(Array.isArray(b) ? b : [])
+      setDeposits(Array.isArray(d) ? d : [])
+      if (!w) setError('Solde indisponible : le backend n’a pas répondu (GET /api/balances).')
     } finally {
       setLoading(false)
     }

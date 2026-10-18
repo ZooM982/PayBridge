@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react'
-import { cn } from '../../lib/format'
+import { cn, frontStatus } from '../../lib/format'
 
 export const STATUS = {
   completed: { label: 'Réussi', cls: 'bg-volt-50 text-volt-600', icon: CheckCircle2 },
@@ -9,7 +9,8 @@ export const STATUS = {
 }
 
 export function StatusBadge({ status, className }) {
-  const s = STATUS[status] ?? STATUS.pending
+  // Tolère les statuts Bitnob bruts (« SETTLED », « QUOTE »…) et l'inconnu.
+  const s = STATUS[frontStatus(status)] ?? STATUS.pending
   const Icon = s.icon
   return (
     <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold', s.cls, className)}>

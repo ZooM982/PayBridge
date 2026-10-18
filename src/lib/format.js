@@ -22,6 +22,22 @@ export function date(iso, withTime = false) {
 
 export const country = (code) => COUNTRIES.find((c) => c.code === code)
 
+/** Pays associé à une devise (GHS → GH, XOF → 1er pays de la zone) — heuristique
+ *  utilisée quand le backend ne renvoie que la devise cible d'un payout. */
+export const countryOfCurrency = (currency) => COUNTRIES.find((c) => c.currency === currency)
+
+/**
+ * Statut Bitnob (SETTLED, QUOTE, PENDING…) ou forme libre → statut du front
+ * (pending | processing | completed | failed). Tolère l'inconnu → `pending`.
+ */
+const STATUS_ALIASES = {
+  settled: 'completed', completed: 'completed', success: 'completed', successful: 'completed',
+  failed: 'failed', expired: 'failed', cancelled: 'failed', canceled: 'failed', reversed: 'failed',
+  initiated: 'processing', processing: 'processing', in_progress: 'processing', pending: 'pending',
+  quote: 'pending', created: 'pending',
+}
+export const frontStatus = (status) => STATUS_ALIASES[String(status ?? '').toLowerCase()] ?? 'pending'
+
 /** Contre-valeur USD d'un montant (taux de démo ; stablecoins et USD ≈ 1). */
 export const toUsd = (amount, currency = 'USD') => (Number(amount) || 0) / (DEMO_RATES_USD[currency] ?? 1)
 

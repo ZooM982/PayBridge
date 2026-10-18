@@ -64,7 +64,7 @@ export default function Confirmation() {
     </Card>
   )
 
-  const h = HEAD[tx.status]
+  const h = HEAD[tx.status] ?? HEAD.pending
   const reasonKey = tx.paymentReason
   const copy = () => { navigator.clipboard?.writeText(tx.reference); toast({ title: 'Référence copiée', text: tx.reference, tone: 'info' }) }
   const simulateDeposit = async () => {
@@ -101,8 +101,10 @@ export default function Confirmation() {
             {[
               ['Montant envoyé', money(tx.amount, tx.sendCurrency)],
               ['Frais', money(tx.fee, tx.sendCurrency)],
-              ['Montant reçu', money(tx.received, tx.receiveCurrency), true],
-              ['Taux appliqué', `1 ${tx.sendCurrency} = ${tx.rate.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} ${tx.receiveCurrency}`],
+              // Taux et montant reçu n'existent pas toujours (envoi crypto, transaction
+              // réconciliée depuis Bitnob) : on n'affiche que ce qu'on sait.
+              ...(tx.received != null ? [['Montant reçu', money(tx.received, tx.receiveCurrency), true]] : []),
+              ...(tx.rate != null ? [['Taux appliqué', `1 ${tx.sendCurrency} = ${Number(tx.rate).toLocaleString('fr-FR', { maximumFractionDigits: 4 })} ${tx.receiveCurrency}`]] : []),
               ['Motif', REASON_LABELS[reasonKey] ?? reasonKey ?? '—'],
               ['Date', date(tx.createdAt, true)],
             ].map(([k, v, hi]) => (
