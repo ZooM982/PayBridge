@@ -35,6 +35,10 @@ const securityBadges = [
 
 export default function Landing() {
   const nav = useNavigate()
+  const scrollTo = (id) => (e) => {
+    e.preventDefault()
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   return (
     <div className="min-h-dvh flex flex-col bg-night text-white">
@@ -55,9 +59,9 @@ export default function Landing() {
           </div>
 
           <div className="hidden lg:flex items-center gap-6 text-[13px] font-medium text-white/60">
-            <a href="#fonctionnalites" className="hover:text-white transition-colors">Fonctionnalités</a>
-            <a href="#comment-ca-marche" className="hover:text-white transition-colors">Comment ça marche</a>
-            <a href="#securite" className="hover:text-white transition-colors">Sécurité</a>
+            <a href="#fonctionnalites" onClick={scrollTo('fonctionnalites')} className="hover:text-white transition-colors">Fonctionnalités</a>
+            <a href="#comment-ca-marche" onClick={scrollTo('comment-ca-marche')} className="hover:text-white transition-colors">Comment ça marche</a>
+            <a href="#securite" onClick={scrollTo('securite')} className="hover:text-white transition-colors">Sécurité</a>
           </div>
 
           <Button onClick={() => nav('/dashboard')} className="text-[14px]">
