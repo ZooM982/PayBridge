@@ -38,3 +38,7 @@ Thumbs.db
 tmp/
 .playwright-mcp/
 coverage/
+
+# Backend local (hackathon) — non versionné, l'API déployée vit sur Render
+server/
+server.rar

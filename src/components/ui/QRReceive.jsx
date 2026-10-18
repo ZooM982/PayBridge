@@ -7,11 +7,19 @@ import { Button } from './Button'
 import { api } from '../../services/api'
 import { cn } from '../../lib/format'
 
-const CHAINS = [
-  { id: 'BTC',  label: 'Bitcoin (BTC)',     prefix: 'bitcoin:' },
-  { id: 'USDT', label: 'USDT (Tron TRC20)', prefix: '' },
-  { id: 'USDC', label: 'USDC (Ethereum)',    prefix: '' },
-]
+const CHAIN_LABELS = {
+  bitcoin: 'Bitcoin', ethereum: 'Ethereum', polygon: 'Polygon', avalanche: 'Avalanche',
+  solana: 'Solana', stellar: 'Stellar', base: 'Base', optimism: 'Optimism',
+}
+const CHAIN_PREFIX = { bitcoin: 'bitcoin:', solana: 'solana:' }
+
+/** Libellé d'une adresse de dépôt : « USDT · Polygon » si le compte précise l'actif. */
+function chainLabel(a) {
+  if (!a) return ''
+  const name = CHAIN_LABELS[a.chain] ?? a.chain
+  const hint = /USDT/i.test(a.label ?? '') ? 'USDT' : /USDC/i.test(a.label ?? '') ? 'USDC' : /BTC/i.test(a.label ?? '') ? 'BTC' : null
+  return hint ? `${hint} · ${name}` : name
+}
 
 /* ── Modal centré (bottom-sheet sur mobile, centré sur desktop) ── */
 function Modal({ open, onClose, title, children }) {
@@ -37,14 +45,14 @@ function Modal({ open, onClose, title, children }) {
       <div ref={overlay} onClick={onClose} className="absolute inset-0 bg-night/50 backdrop-blur-[3px]" />
       {/* Centering — décalé de 260px sur lg pour tenir compte de la sidebar fixe */}
       <div className="pointer-events-none absolute inset-0 flex items-end justify-center sm:items-center sm:p-6 lg:pl-[260px]">
-        <div ref={panel} className="pointer-events-auto relative flex w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-white sm:rounded-3xl">
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-6 py-5">
+        <div ref={panel} className="pointer-events-auto relative flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-white sm:rounded-3xl">
+          <div className="flex shrink-0 items-center justify-between border-b border-line bg-white px-6 py-5">
             <h2 className="text-[17px] font-semibold">{title}</h2>
             <button onClick={onClose} aria-label="Fermer" className="grid size-9 place-items-center rounded-xl text-ink-mute hover:bg-mist hover:text-ink">
               <X className="size-5" />
             </button>
           </div>
-          <div className="overflow-y-auto px-6 py-5" style={{ maxHeight: 'min(85dvh, 560px)' }}>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {children}
           </div>
         </div>
@@ -176,23 +184,36 @@ function LightningTab() {
 
 /* ── Onglet On-chain ── */
 function OnChainTab() {
-  const [chain, setChain] = useState('BTC')
+  const [options, setOptions] = useState(null)
+  const [chain, setChain] = useState(null)
   const [open, setOpen] = useState(false)
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const load = useCallback(async (c) => {
+  const load = useCallback(async () => {
     setError(null); setLoading(true)
-    try { setData(await api.getDepositAddress({ chain: c })) }
-    catch (e) { setError(e.message) }
-    finally { setLoading(false) }
+    try {
+      const res = await api.getDepositAddresses()
+      // Un réseau peut avoir plusieurs adresses : on garde celle qui précise l'actif.
+      const hasAsset = (a) => /USDT|USDC|BTC/i.test(a.label ?? '')
+      const byChain = new Map()
+      for (const a of res?.addresses ?? []) {
+        const cur = byChain.get(a.chain)
+        if (!cur || (!hasAsset(cur) && hasAsset(a))) byChain.set(a.chain, a)
+      }
+      const opts = [...byChain.values()]
+      if (!opts.length) throw new Error('Aucune adresse de dépôt disponible sur ce compte Bitnob.')
+      setOptions(opts)
+      setChain((c) => (opts.some((o) => o.chain === c) ? c : opts[0].chain))
+    } catch (e) {
+      setError(e.message); setOptions([])
+    } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load(chain) }, [chain, load])
+  useEffect(() => { load() }, [load])
 
-  const selected = CHAINS.find(c => c.id === chain)
-  const qrText = data?.address ? `${selected?.prefix ?? ''}${data.address}` : null
+  const selected = options?.find((o) => o.chain === chain) ?? null
+  const qrText = selected?.address ? `${CHAIN_PREFIX[selected.chain] ?? ''}${selected.address}` : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -201,37 +222,39 @@ function OnChainTab() {
         Partagez cette adresse pour recevoir un paiement on-chain.
       </div>
 
-      <div className="relative">
-        <button onClick={() => setOpen(v => !v)}
-          className="flex h-11 w-full items-center justify-between rounded-xl border border-line bg-white px-3.5 text-[14px] text-ink hover:border-volt/60 focus:border-volt focus:outline-none focus:ring-4 focus:ring-volt/15">
-          <span>{selected?.label}</span>
-          <ChevronDown className={cn('size-4 text-ink-mute transition-transform', open && 'rotate-180')} />
-        </button>
-        {open && (
-          <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-10 overflow-hidden rounded-xl border border-line bg-white shadow-lg">
-            {CHAINS.map(c => (
-              <button key={c.id} onClick={() => { setChain(c.id); setOpen(false) }}
-                className={cn('flex w-full items-center px-4 py-3 text-[13px] text-left transition-colors hover:bg-mist', c.id === chain && 'bg-volt/5 font-semibold text-volt')}>
-                {c.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {options && options.length > 0 && (
+        <div>
+          <button onClick={() => setOpen(v => !v)}
+            className="flex h-11 w-full items-center justify-between rounded-xl border border-line bg-white px-3.5 text-[14px] text-ink hover:border-volt/60 focus:border-volt focus:outline-none focus:ring-4 focus:ring-volt/15">
+            <span>{chainLabel(selected)}</span>
+            <ChevronDown className={cn('size-4 text-ink-mute transition-transform', open && 'rotate-180')} />
+          </button>
+          {open && (
+            <div className="mt-1.5 overflow-hidden rounded-xl border border-line bg-white shadow-lg">
+              {options.map(o => (
+                <button key={o.chain} onClick={() => { setChain(o.chain); setOpen(false) }}
+                  className={cn('flex w-full items-center px-4 py-3 text-[13px] text-left transition-colors hover:bg-mist', o.chain === chain && 'bg-volt/5 font-semibold text-volt')}>
+                  {chainLabel(o)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</p>}
 
       {loading
         ? <div className="flex h-[220px] items-center justify-center"><Loader2 className="size-6 animate-spin text-ink-mute" /></div>
-        : data?.address && (
+        : selected?.address && (
           <div className="flex flex-col items-center gap-4">
             <QRDisplay text={qrText} />
             <div className="w-full rounded-xl border border-line bg-mist px-3 py-2">
-              <p className="break-all font-mono text-[11px] leading-relaxed text-ink-mute">{data.address}</p>
+              <p className="break-all font-mono text-[11px] leading-relaxed text-ink-mute">{selected.address}</p>
             </div>
             <div className="flex w-full gap-2">
-              <CopyBtn text={data.address} className="flex-1 justify-center" />
-              <button onClick={() => load(chain)}
+              <CopyBtn text={selected.address} className="flex-1 justify-center" />
+              <button onClick={load}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-mist px-3 py-1.5 text-[12px] font-medium text-ink-soft hover:bg-mist/80 transition-colors">
                 <RefreshCw className="size-3.5" /> Rafraîchir
               </button>

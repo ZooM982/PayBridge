@@ -11,11 +11,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxy les appels /api vers le backend Express (port 4001)
+      // Proxy les appels /api vers le backend Express local (port 4001)
       '/api': {
         target: 'http://localhost:4001',
         changeOrigin: true,
       },
+      // Pour pointer directement vers Render en prod :
+      // '/api': {
+      //   target: 'https://paybridge-ilvu.onrender.com',
+      //   changeOrigin: true,
+      //   secure: true,
+      // },
     },
   },
 })

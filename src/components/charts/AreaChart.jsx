@@ -55,7 +55,7 @@ export function AreaChart({ data, height = 240, currency = 'USD' }) {
   return (
     <div ref={box} className="relative">
       <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="w-full touch-pan-y" role="img"
-        aria-label="Volume des transferts par jour" onMouseMove={onMove} onTouchMove={onMove} onMouseLeave={() => setHover(null)}>
+        aria-label="Volume des opérations par jour" onMouseMove={onMove} onTouchMove={onMove} onMouseLeave={() => setHover(null)}>
         <defs>
           <linearGradient id="pb-area" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#00D68F" stopOpacity="0.28" />

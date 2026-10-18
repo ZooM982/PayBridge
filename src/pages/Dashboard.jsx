@@ -13,7 +13,7 @@ import { QRReceive } from '../components/ui/QRReceive'
 import { AreaChart } from '../components/charts/AreaChart'
 import { TxRow, SeeAll } from '../components/TxParts'
 import { PageHeader } from '../components/layout/PageHeader'
-import { money, compact, cn } from '../lib/format'
+import { money, compact, toUsd, cn } from '../lib/format'
 import { COUNTRIES, DEMO_USER } from '../data/demo'
 
 const RANGES = { '7j': 7, '14j': 14, '30j': 30 }
@@ -21,7 +21,7 @@ const RANGES = { '7j': 7, '14j': 14, '30j': 30 }
 function BalanceCard({ wallet, loading, onReceive }) {
   const nav = useNavigate()
   const [hidden, setHidden] = useState(false)
-  const ref = useCountUp(wallet?.balance, (v) => money(v, 'USD'), [hidden])
+  const balanceText = useCountUp(wallet?.balance, (v) => money(v, 'USD'), [hidden])
   return (
     <div data-reveal className="relative overflow-hidden rounded-[var(--radius-card)] bg-night p-6 text-white sm:p-7 lg:col-span-2">
       <div aria-hidden className="absolute -right-24 -top-24 size-72 rounded-full bg-volt/20 blur-3xl" />
@@ -35,10 +35,17 @@ function BalanceCard({ wallet, loading, onReceive }) {
         </div>
         {loading ? <Skeleton className="mt-3 h-11 w-60 !bg-white/10" /> : (
           <p className="tabular mt-2 text-[38px] font-bold tracking-tight sm:text-[44px]">
-            {hidden ? '•••••• $' : <span ref={ref}>{money(0)}</span>}
+            {hidden ? '•••••• $' : balanceText}
           </p>
         )}
-        <p className="mt-1 text-[13px] text-white/50">Portefeuille USD · {DEMO_USER.business}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <p className="text-[13px] text-white/50">{DEMO_USER.business}</p>
+          {wallet?.wallets?.map((w) => (
+            <span key={w.currency} className={cn('rounded-md px-2 py-0.5 text-[11px] font-semibold', w.balance > 0 ? 'bg-volt/20 text-volt' : 'bg-white/10 text-white/60')}>
+              {w.balance.toLocaleString('fr-FR', { minimumFractionDigits: w.currency === 'BTC' ? 4 : 2 })} {w.currency}
+            </span>
+          ))}
+        </div>
         <div className="mt-7 flex flex-wrap gap-2.5">
           <Button size="lg" icon={Plus} onClick={() => nav('/transferts')}>Nouveau transfert</Button>
           <Button size="lg" variant="ghost" icon={ArrowDownLeft} onClick={onReceive} className="!text-white/80 hover:!bg-white/10 hover:!text-white">Recevoir</Button>
@@ -46,6 +53,13 @@ function BalanceCard({ wallet, loading, onReceive }) {
       </div>
     </div>
   )
+}
+
+/** Montant animé (compteur) isolé : ses re-rendus ne touchent pas le reste du Dashboard. */
+function AnimatedAmount({ value, loading }) {
+  const text = useCountUp(loading ? null : value, (v) => money(v, 'USD'))
+  if (loading) return <Skeleton className="mt-3 h-10 w-44" />
+  return <p className="tabular mt-2 text-[32px] font-bold tracking-tight">{text}</p>
 }
 
 function KPI({ icon: Icon, label, value, tone, loading, sub }) {
@@ -64,11 +78,10 @@ function KPI({ icon: Icon, label, value, tone, loading, sub }) {
 
 export default function Dashboard() {
   const nav = useNavigate()
-  const { wallet, transfers, beneficiaries, stats, loading, error, reload } = useStore()
+  const { wallet, transfers, deposits, beneficiaries, stats, loading, error, reload } = useStore()
   const [range, setRange] = useState('14j')
   const [receiveOpen, setReceiveOpen] = useState(false)
   const scope = useReveal([loading])
-  const volRef = useCountUp(loading ? null : stats.volume, (v) => money(v, 'USD'))
 
   // Taux du jour — endpoint Bitnob « List Exchange Rates » (GET /api/rates en mode API).
   const [rates, setRates] = useState(null)
@@ -92,16 +105,30 @@ export default function Dashboard() {
       })
   }, [transfers])
 
+  /** Courbe « Volume des transactions » : envois + reçus (USD), sur les 7/14/30 derniers jours. */
   const series = useMemo(() => {
     const days = RANGES[range]
-    const end = new Date('2026-10-17T23:59:59Z')
+    const end = new Date()
+    const ops = [
+      ...transfers.map((t) => ({ status: t.status, createdAt: t.createdAt, amount: t.amount, currency: t.sendCurrency })),
+      ...deposits.map((d) => ({ status: d.status, createdAt: d.createdAt, amount: d.amount, currency: d.currency })),
+    ]
     return Array.from({ length: days }, (_, i) => {
       const d = new Date(end); d.setUTCDate(end.getUTCDate() - (days - 1 - i))
       const key = d.toISOString().slice(0, 10)
-      const value = transfers.filter((t) => t.status !== 'failed' && t.createdAt.slice(0, 10) === key).reduce((a, t) => a + t.amount, 0)
+      const value = ops
+        .filter((o) => o.status !== 'failed' && String(o.createdAt ?? '').slice(0, 10) === key)
+        .reduce((a, o) => a + toUsd(o.amount, o.currency), 0)
       return { label: d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }), value: Math.round(value * 100) / 100 }
     })
-  }, [transfers, range])
+  }, [transfers, deposits, range])
+
+  /** Envois + réceptions fusionnés, du plus récent au plus ancien (activité réelle). */
+  const recent = useMemo(() => {
+    const out = transfers.map((t) => ({ ...t, direction: 'out' }))
+    const inbound = deposits.map((d) => ({ ...d, direction: 'in' }))
+    return [...out, ...inbound].sort((a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0))
+  }, [transfers, deposits])
 
   if (error) return (
     <Card className="mx-auto max-w-lg">
@@ -119,16 +146,21 @@ export default function Dashboard() {
         <BalanceCard wallet={wallet} loading={loading} onReceive={() => setReceiveOpen(true)} />
         <Card data-reveal className="flex flex-col justify-between p-6">
           <div className="flex items-center justify-between">
-            <p className="flex items-center gap-2 text-[13px] font-medium text-ink-soft"><TrendingUp className="size-4" /> Volume total transféré</p>
+            <p className="flex items-center gap-2 text-[13px] font-medium text-ink-soft"><TrendingUp className="size-4" /> Volume total échangé</p>
             <DemoTag />
           </div>
-          {loading ? <Skeleton className="mt-3 h-10 w-44" /> : <p className="tabular mt-2 text-[32px] font-bold tracking-tight" ref={volRef}>0</p>}
+          <AnimatedAmount value={stats.volume} loading={loading} />
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-mute">
+            <span className="tabular font-semibold text-ink-soft">{money(stats.sent, 'USD')}</span> envoyés
+            <span aria-hidden>·</span>
+            <span className="tabular font-semibold text-emerald-600">+{money(stats.received, 'USD')}</span> reçus
+          </div>
           <div className="mt-4 flex items-center gap-2 text-[13px]">
             <span className="rounded-md bg-volt-50 px-1.5 py-0.5 font-semibold text-volt-600">+18,4 %</span>
             <span className="text-ink-mute">vs. 30 jours précédents</span>
           </div>
-          <div className="mt-5 grid grid-cols-3 gap-2 border-t border-line pt-4 text-center">
-            {[['Transferts', transfers.length], ['Corridors', new Set(transfers.map((t) => t.toCountry)).size], ['Bénéf.', beneficiaries.length]].map(([l, v]) => (
+          <div className="mt-5 grid grid-cols-4 gap-2 border-t border-line pt-4 text-center">
+            {[['Transferts', transfers.length], ['Reçus', deposits.length], ['Corridors', new Set(transfers.map((t) => t.toCountry)).size], ['Bénéf.', beneficiaries.length]].map(([l, v]) => (
               <div key={l}><p className="tabular text-[17px] font-bold">{loading ? '–' : v}</p><p className="text-[11px] text-ink-mute">{l}</p></div>
             ))}
           </div>
@@ -143,7 +175,7 @@ export default function Dashboard() {
 
       <div className="mt-4 grid gap-4 lg:mt-5 lg:grid-cols-5 lg:gap-5">
         <Card data-reveal className="lg:col-span-3">
-          <CardHeader title="Volume des transactions" subtitle={`Montants envoyés (USD) · ${range}`}
+          <CardHeader title="Volume des transactions" subtitle={`Montants envoyés et reçus (USD) · ${range}`}
             action={
               <div className="flex rounded-xl bg-mist p-1" role="tablist" aria-label="Période">
                 {Object.keys(RANGES).map((r) => (
@@ -205,18 +237,18 @@ export default function Dashboard() {
       </div>
 
       <Card data-reveal className="mt-4 lg:mt-5">
-        <CardHeader title="Opérations récentes" subtitle="Cliquez sur une opération pour voir le détail" action={<SeeAll to="/historique" />} />
+        <CardHeader title="Opérations récentes" subtitle="Envoyés et reçus — cliquez sur un envoi pour voir le détail" action={<SeeAll to="/historique" />} />
         <div className="p-2 sm:p-3">
           {loading ? Array.from({ length: 5 }, (_, i) => (
             <div key={i} className="flex items-center gap-4 px-3 py-3"><Skeleton className="size-10 rounded-full" /><div className="flex-1 space-y-2"><Skeleton className="h-3.5 w-40" /><Skeleton className="h-3 w-56" /></div><Skeleton className="h-5 w-20" /></div>
-          )) : transfers.length === 0 ? (
-            <EmptyState icon={Send} title="Aucun transfert pour l'instant" text="Votre premier envoi apparaîtra ici." action={<Button icon={Plus} onClick={() => nav('/transferts')}>Nouveau transfert</Button>} />
-          ) : transfers.slice(0, 6).map((t) => <TxRow key={t.id} tx={t} onClick={() => nav(`/transferts/${t.id}`)} />)}
+          )) : recent.length === 0 ? (
+            <EmptyState icon={Send} title="Aucune opération pour l'instant" text="Votre premier envoi apparaîtra ici." action={<Button icon={Plus} onClick={() => nav('/transferts')}>Nouveau transfert</Button>} />
+          ) : recent.slice(0, 6).map((t) => <TxRow key={t.id} tx={t} onClick={() => nav(`/transferts/${t.id}`)} />)}
         </div>
       </Card>
 
       <p className="mt-6 text-center text-[12px] text-ink-mute">
-        {compact(transfers.length)} opérations affichées · données de démonstration, aucune transaction réelle.
+        {compact(recent.length)} opérations affichées · données de démonstration, aucune transaction réelle.
       </p>
       <QRReceive open={receiveOpen} onClose={() => setReceiveOpen(false)} />
     </div>

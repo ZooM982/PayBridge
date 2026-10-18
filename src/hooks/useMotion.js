@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
 
@@ -13,13 +13,19 @@ export function useReveal(deps = []) {
   return scope
 }
 
-/** Compteur animé pour les montants. */
+/**
+ * Compteur animé pour les montants.
+ * Passe par l'état React (et non textContent) : la valeur affichée converge
+ * toujours exactement vers `value`, même si le composant se re-rend entre-temps.
+ * Renvoie la chaîne déjà formatée.
+ */
 export function useCountUp(value, format, deps = []) {
-  const ref = useRef()
+  const [display, setDisplay] = useState(() => value ?? 0)
   useGSAP(() => {
-    if (!ref.current || value == null) return
-    const o = { v: 0 }
-    gsap.to(o, { v: value, duration: 1.3, ease: 'power3.out', onUpdate: () => { if (ref.current) ref.current.textContent = format(o.v) } })
+    if (value == null) { setDisplay(0); return }
+    const o = { v: display }
+    const tween = gsap.to(o, { v: value, duration: 1.3, ease: 'power3.out', onUpdate: () => setDisplay(o.v) })
+    return () => tween.kill()
   }, { dependencies: [value, ...deps] })
-  return ref
+  return format(display)
 }

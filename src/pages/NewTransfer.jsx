@@ -17,12 +17,13 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { COUNTRIES, DEMO_RATES_USD, REASONS, REASON_LABELS } from '../data/demo'
 import { money, quote, country, cn } from '../lib/format'
 import { channelsOf, channelTitle, channelAccount, CHANNEL_KINDS } from '../lib/channels'
+import { channelSupport, effectiveCryptoAsset } from '../lib/corridors'
 
 const SENDERS = COUNTRIES
 const RECEIVERS = COUNTRIES.filter((c) => !['FR', 'US'].includes(c.code))
-const QUICK = [50, 100, 250, 500, 1000]
+const QUICK = [1, 5, 10, 25, 50]
 const KIND_ICON = { mobile: Smartphone, bank: Landmark, crypto: Bitcoin, lightning: Zap }
-const DEC = { SATS: 0, USDT: 2, BTC: 8 }
+const DEC = { SATS: 0, USDT: 2, USDC: 2, BTC: 8 }
 const RAIL_ICON = { mobile: Smartphone, bank: Landmark, crypto: Bitcoin, lightning: Zap }
 const fiatOf = (ch) => !ch ? true : !['crypto', 'lightning'].includes(ch.kind)
 const recvOf = (ch, toCountry) => fiatOf(ch) ? country(toCountry)?.currency : (ch?.kind === 'lightning' ? 'SATS' : (ch?.asset ?? 'USDT'))
@@ -108,7 +109,9 @@ function SummaryPanel({ q, form, beneficiary, ch, step }) {
 
         <div className="mt-5 space-y-2 text-[12px] text-white/50">
           <p className="flex items-center gap-2"><Lock className="size-3.5" /> Montants verrouillés avant votre confirmation</p>
-          <p className="flex items-center gap-2"><ShieldCheck className="size-3.5" /> Rail : {ch ? `${CHANNEL_KINDS[ch.kind]?.label ?? ch.kind} (${channelTitle(ch)})` : '—'}</p>
+          <p className="flex items-center gap-2"><ShieldCheck className="size-3.5" /> Rail : {ch
+            ? `${CHANNEL_KINDS[ch.kind]?.label ?? ch.kind} (${ch.kind === 'crypto' ? `${recv} · ${ch.chain ?? 'ETHEREUM'}` : channelTitle(ch)})`
+            : '—'}</p>
         </div>
         <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4">
           <PoweredBy className="!text-white/35" /><DemoTag />
@@ -138,6 +141,8 @@ export default function NewTransfer() {
   const chs = useMemo(() => channelsOf(beneficiary), [beneficiary])
   // Aucun canal par défaut : l'utilisateur doit choisir explicitement le rail de réception.
   const channel = chs.find((c) => c.id === form.channelId) ?? null
+  // Le canal choisi est-il accepté par Bitnob pour ce corridor ? (sinon on bloque.)
+  const support = useMemo(() => channelSupport(channel, form.toCountry, form.sendCurrency), [channel, form.toCountry, form.sendCurrency])
 
   // Le pays de réception suit le bénéficiaire choisi (le canal reste à choisir explicitement).
   useEffect(() => {
@@ -162,7 +167,15 @@ export default function NewTransfer() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, ...(k === 'toCountry' ? { beneficiaryId: '', channelId: '' } : {}) }))
   const fiat = fiatOf(channel)
-  const recvCurrency = recvOf(channel, form.toCountry)
+  // Pour un canal crypto, l'actif reçu = la devise du portefeuille débité
+  // (USDC envoyé sur un canal ETH part en USDC, pas en USDT).
+  const recvCurrency = channel?.kind === 'crypto'
+    ? effectiveCryptoAsset(channel, form.sendCurrency)
+    : recvOf(channel, form.toCountry)
+  // Actif envoyé ≠ actif déclaré par le canal : valide pour un wallet self-custody,
+  // risqué sur une adresse de dépôt d'exchange spécifique à un token → on avertit.
+  const declaredAsset = channel ? String(channel.asset ?? '').toUpperCase() : ''
+  const assetMismatch = channel?.kind === 'crypto' && !!declaredAsset && declaredAsset !== recvCurrency
 
   const qLocal = useMemo(() => quote({ amount: form.amount, sendCurrency: form.sendCurrency, receiveCurrency: fiat ? recvCurrency : 'USD' }), [form.amount, form.sendCurrency, recvCurrency, fiat])
   const [qApi, setQApi] = useState(null)
@@ -186,13 +199,15 @@ export default function NewTransfer() {
 
   const wallets = wallet?.wallets ?? (wallet ? [{ currency: 'USD', balance: wallet.balance, label: 'Portefeuille USD' }] : [])
   const selectedWallet = wallets.find((w) => w.currency === form.sendCurrency) ?? wallets[0] ?? null
-  const amountUsd = (Number(form.amount) || 0) / DEMO_RATES_USD[form.sendCurrency]
+  const sendRate = DEMO_RATES_USD[form.sendCurrency] ?? 1
+  const amountUsd = (Number(form.amount) || 0) / sendRate
   const errors = {
     amount: !(Number(form.amount) > 0) ? 'Saisissez un montant.'
-      : amountUsd < 10 ? `Montant minimum : ${money(10 * DEMO_RATES_USD[form.sendCurrency], form.sendCurrency)}`
+      : amountUsd < 1 ? `Montant minimum : ${money(1 * sendRate, form.sendCurrency)}`
       : !sandboxFunding && selectedWallet && Number(form.amount) > selectedWallet.balance ? `Solde insuffisant — ${money(selectedWallet.balance, selectedWallet.currency)} disponibles.` : null,
     beneficiaryId: !form.beneficiaryId ? 'Choisissez un bénéficiaire.' : null,
-    channelId: form.beneficiaryId && !channel ? 'Choisissez un canal de réception.' : null,
+    channelId: form.beneficiaryId && !channel ? 'Choisissez un canal de réception.'
+      : channel && !support.ok ? support.reason : null,
   }
   const valid = !errors.amount && !errors.beneficiaryId && !errors.channelId
 
@@ -329,14 +344,23 @@ export default function NewTransfer() {
                     {chs.map((c) => {
                       const on = c.id === channel?.id
                       const Icon = KIND_ICON[c.kind]
+                      const sup = channelSupport(c, form.toCountry, form.sendCurrency)
+                      const title = c.kind === 'crypto'
+                        ? `${effectiveCryptoAsset(c, form.sendCurrency)} · ${c.chain ?? 'ETHEREUM'}`
+                        : channelTitle(c)
                       return (
-                        <button key={c.id} role="radio" aria-checked={on} onClick={() => setForm((f) => ({ ...f, channelId: c.id }))}
+                        <button key={c.id} role="radio" aria-checked={on} disabled={!sup.ok}
+                          title={sup.ok ? undefined : sup.reason}
+                          onClick={() => sup.ok && setForm((f) => ({ ...f, channelId: c.id }))}
                           className={cn('flex items-center gap-3 rounded-xl border p-3 text-left transition-all',
-                            on ? 'border-volt bg-volt-50/60 ring-4 ring-volt/10' : touched && errors.channelId ? 'border-danger/50' : 'border-line hover:border-ink-mute')}>
+                            !sup.ok ? 'cursor-not-allowed border-line bg-mist/50 opacity-70'
+                              : on ? 'border-volt bg-volt-50/60 ring-4 ring-volt/10'
+                              : touched && errors.channelId ? 'border-danger/50' : 'border-line hover:border-ink-mute')}>
                           <span className={cn('grid size-9 shrink-0 place-items-center rounded-xl', on ? 'bg-volt-50 text-volt-600' : 'bg-mist text-ink-soft')}><Icon className="size-4" /></span>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13px] font-semibold">{channelTitle(c)}{c.isDefault && <span className="ml-1.5 rounded-md bg-night px-1 py-0.5 text-[9px] font-bold uppercase text-white">défaut</span>}</p>
+                            <p className="truncate text-[13px] font-semibold">{title}{c.isDefault && <span className="ml-1.5 rounded-md bg-night px-1 py-0.5 text-[9px] font-bold uppercase text-white">défaut</span>}</p>
                             <p className="truncate font-mono text-[11px] text-ink-mute">{channelAccount(c)}</p>
+                            {!sup.ok && <p className="mt-0.5 text-[11px] font-semibold text-warn">Indisponible pour ce pays</p>}
                           </div>
                           <span className={cn('grid size-5 place-items-center rounded-full border-2', on ? 'border-volt bg-volt' : 'border-line')}>
                             {on && <span className="size-1.5 rounded-full bg-night" />}
@@ -346,9 +370,20 @@ export default function NewTransfer() {
                     })}
                   </div>
                   {touched && errors.channelId && <p className="mt-1.5 text-[12px] font-medium text-danger">{errors.channelId}</p>}
+                  {channel && !support.ok && (
+                    <p className="mt-2 flex items-start gap-1.5 text-[12px] font-medium text-warn">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {support.reason}
+                    </p>
+                  )}
                   {channel?.kind === 'crypto' && (
                     <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-mute">
-                      <Bitcoin className="size-3.5" /> Réseau : <b className="text-ink">{channel.chain ?? 'TRON'}</b> · adresse validée par le rail de paiement.
+                      <Bitcoin className="size-3.5" /> Envoi de <b className="text-ink">{recvCurrency}</b> sur <b className="text-ink">{channel.chain ?? 'ETHEREUM'}</b> · adresse validée par le rail de paiement.
+                    </p>
+                  )}
+                  {assetMismatch && (
+                    <p className="mt-1.5 flex items-start gap-2 rounded-lg bg-warn/10 p-2.5 text-[12px] font-medium text-warn">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                      <span>Ce canal annonce <b>{declaredAsset}</b> mais vous envoyez <b>{recvCurrency}</b>. Valide vers un wallet personnel (même adresse sur ce réseau) ; sur une <b>adresse de dépôt d'exchange spécifique au {declaredAsset}</b>, les fonds pourraient ne pas être crédités.</span>
                     </p>
                   )}
                 </div>
@@ -433,7 +468,9 @@ export default function NewTransfer() {
 
               <dl className="mt-5 divide-y divide-line rounded-2xl border border-line px-4 text-[14px]">
                 {[
-                  ['Rail', `${CHANNEL_KINDS[channel.kind]?.label} — ${channel.rail ?? CHANNEL_KINDS[channel.kind]?.rail}`],
+                  ['Rail', channel.kind === 'crypto'
+                    ? `Crypto — ${recvCurrency} · ${channel.chain ?? 'ETHEREUM'}`
+                    : `${CHANNEL_KINDS[channel.kind]?.label} — ${channel.rail ?? CHANNEL_KINDS[channel.kind]?.rail}`],
                   ['Trajet', <span key="r"><Flag code={form.fromCountry} className="text-[14px]" /> {country(form.fromCountry)?.name}
                     {fiat && <> → <Flag code={form.toCountry} className="text-[14px]" /> {country(form.toCountry)?.name}</>}</span>],
                   ['Montant envoyé', money(q.amount, form.sendCurrency)],
@@ -447,6 +484,16 @@ export default function NewTransfer() {
                 ))}
                 <div className="flex items-center justify-between gap-4 py-4"><dt className="font-semibold">Montant reçu</dt><dd className="tabular text-[20px] font-bold text-volt-600">{money(q.received, recvCurrency)}</dd></div>
               </dl>
+
+              {assetMismatch && (
+                <div className="mt-4 flex items-start gap-3 rounded-xl border border-warn/20 bg-warn/10 p-4 text-[13px] text-warn">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Actif différent de celui annoncé par le destinataire</p>
+                    <p className="mt-0.5 text-warn/80">Le canal de {beneficiary.name} déclare <b>{declaredAsset}</b> mais vous envoyez <b>{recvCurrency}</b>. Valide vers un wallet personnel (même adresse sur ce réseau). Sur une adresse de dépôt d'exchange spécifique au {declaredAsset}, vérifiez que {recvCurrency} est accepté.</p>
+                  </div>
+                </div>
+              )}
 
               {submitError && (
                 <div role="alert" className="mt-4 flex items-start gap-3 rounded-xl border border-danger/20 bg-danger-50 p-4 text-[13px] text-danger">

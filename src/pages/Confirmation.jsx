@@ -25,7 +25,8 @@ function StatusHero({ status }) {
   const done = status === 'completed', failed = status === 'failed'
   useGSAP(() => {
     gsap.fromTo('[data-disc]', { scale: 0 }, { scale: 1, duration: 0.6, ease: 'back.out(1.8)' })
-    gsap.fromTo('[data-mark]', { strokeDashoffset: 40 }, { strokeDashoffset: 0, duration: 0.5, delay: 0.3, ease: 'power2.out' })
+    // `[data-mark]` n'existe qu'aux états terminaux — sinon GSAP râle sur une cible absente.
+    if (done || failed) gsap.fromTo('[data-mark]', { strokeDashoffset: 40 }, { strokeDashoffset: 0, duration: 0.5, delay: 0.3, ease: 'power2.out' })
     if (done) gsap.fromTo('[data-burst] span', { scale: 0, opacity: 1 }, { scale: 1, opacity: 0, x: (i) => Math.cos(i) * 70, y: (i) => Math.sin(i) * 70, duration: 0.9, stagger: 0.01, ease: 'power3.out' })
   }, { scope: ref, dependencies: [status] })
 
@@ -53,7 +54,7 @@ export default function Confirmation() {
   const [simulating, setSimulating] = useState(false)
   const tx = transfers.find((t) => t.id === id)
   const scope = useRef()
-  useGSAP(() => { gsap.from('[data-reveal]', { y: 20, opacity: 0, duration: 0.6, stagger: 0.08, ease: 'power3.out', clearProps: 'all' }) }, { scope, dependencies: [!!tx] })
+  useGSAP(() => { if (tx) gsap.from('[data-reveal]', { y: 20, opacity: 0, duration: 0.6, stagger: 0.08, ease: 'power3.out', clearProps: 'all' }) }, { scope, dependencies: [!!tx] })
 
   if (loading) return <div className="skeleton mx-auto h-[520px] max-w-2xl rounded-3xl" />
   if (!tx) return (
@@ -128,7 +129,7 @@ export default function Confirmation() {
         </div>
 
         <div className="flex flex-col gap-2 border-t border-line bg-mist/50 px-6 py-5 sm:flex-row sm:px-10" data-reveal>
-          {tx.fundingMode === 'onchain' && tx.status === 'pending' && <Button icon={FlaskConical} loading={simulating} onClick={simulateDeposit} className="sm:flex-[1.4]">Simuler le dépôt sandbox</Button>}
+          {tx.fundingMode === 'onchain' && tx.quoteId && tx.status === 'pending' && <Button icon={FlaskConical} loading={simulating} onClick={simulateDeposit} className="sm:flex-[1.4]">Simuler le dépôt sandbox</Button>}
           <Button variant="outline" icon={Printer} onClick={() => window.print()} className="sm:flex-1">Reçu</Button>
           <Button variant="outline" icon={Share2} onClick={copy} className="sm:flex-1">Partager</Button>
           <Button icon={Plus} onClick={() => nav('/transferts')} className="sm:flex-[1.4]">Nouveau transfert</Button>

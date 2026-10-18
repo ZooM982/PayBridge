@@ -22,11 +22,16 @@ export function date(iso, withTime = false) {
 
 export const country = (code) => COUNTRIES.find((c) => c.code === code)
 
+/** Contre-valeur USD d'un montant (taux de démo ; stablecoins et USD ≈ 1). */
+export const toUsd = (amount, currency = 'USD') => (Number(amount) || 0) / (DEMO_RATES_USD[currency] ?? 1)
+
 /** Devis : montant envoyé → frais, taux, montant reçu. Reproduit ce que renverra l'API. */
-export function quote({ amount, sendCurrency, receiveCurrency }) {
+export function quote({ amount, sendCurrency = 'USD', receiveCurrency = 'USD' }) {
   const a = Number(amount) || 0
-  const toUsd = 1 / DEMO_RATES_USD[sendCurrency]
-  const rate = DEMO_RATES_USD[receiveCurrency] / DEMO_RATES_USD[sendCurrency]
+  const sendRate = DEMO_RATES_USD[sendCurrency] ?? (['USD', 'USDC', 'USDT'].includes(sendCurrency) ? 1 : 1)
+  const recvRate = DEMO_RATES_USD[receiveCurrency] ?? (['USD', 'USDC', 'USDT'].includes(receiveCurrency) ? 1 : 1)
+  const toUsd = 1 / sendRate
+  const rate = recvRate / sendRate
   const fee = a > 0 ? a * DEMO_FEES.percent + DEMO_FEES.fixedUsd / toUsd : 0
   const net = Math.max(a - fee, 0)
   return {

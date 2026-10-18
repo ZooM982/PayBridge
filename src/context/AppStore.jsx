@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../services/api'
+import { toUsd } from '../lib/format'
 import { IS_DEMO, DEMO_RATES_USD } from '../data/demo'
 
 const Ctx = createContext(null)
@@ -7,6 +8,7 @@ const Ctx = createContext(null)
 export function AppStoreProvider({ children }) {
   const [wallet, setWallet] = useState(null)
   const [transfers, setTransfers] = useState([])
+  const [deposits, setDeposits] = useState([])
   const [beneficiaries, setBeneficiaries] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -17,8 +19,10 @@ export function AppStoreProvider({ children }) {
     setLoading(true)
     setError(null)
     try {
-      const [w, t, b] = await Promise.all([api.getWallet(), api.getTransfers(), api.getBeneficiaries()])
-      setWallet(w); setTransfers(t); setBeneficiaries(b)
+      const [w, t, b, d] = await Promise.all([
+        api.getWallet(), api.getTransfers(), api.getBeneficiaries(), api.getDeposits().catch(() => []),
+      ])
+      setWallet(w); setTransfers(t); setBeneficiaries(b); setDeposits(d)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -28,13 +32,43 @@ export function AppStoreProvider({ children }) {
 
   useEffect(() => { load(); return () => timers.current.forEach(clearTimeout) }, [load])
 
+  /** Recharge uniquement le solde (appel léger) — polling, focus onglet… */
+  const refreshWallet = useCallback(() => {
+    if (IS_DEMO) return
+    api.getWallet().then(setWallet).catch(() => {})
+  }, [])
+
+  /** Recharge les opérations reçues (dépôts on-chain + comptes virtuels). */
+  const refreshDeposits = useCallback(() => {
+    if (IS_DEMO) return
+    api.getDeposits().then(setDeposits).catch(() => {})
+  }, [])
+
+  // Solde et dépôts en direct : polling léger + rafraîchissement au retour sur l'onglet.
+  useEffect(() => {
+    if (IS_DEMO) return
+    const refresh = () => { refreshWallet(); refreshDeposits() }
+    const id = setInterval(refresh, 15_000)
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refreshWallet, refreshDeposits])
+
   // Mode API : les statuts viennent du flux SSE du backend (webhooks Bitnob + polling),
   // les timers simulés ne servent plus qu'en mode démo.
   useEffect(() => {
     if (IS_DEMO) return
-    return api.subscribeStatusEvents(({ id, status }) =>
-      setTransfers((s) => s.map((t) => (t.id === id ? { ...t, status, [`${status}At`]: new Date().toISOString() } : t))))
-  }, [])
+    return api.subscribeStatusEvents(({ id, status }) => {
+      setTransfers((s) => s.map((t) => (t.id === id ? { ...t, status, [`${status}At`]: new Date().toISOString() } : t)))
+      // Un solde change vraiment quand le transfert aboutit (ou échoue) → on recharge.
+      if (status === 'completed' || status === 'failed') refreshWallet()
+    })
+  }, [refreshWallet])
 
   const toast = useCallback((t) => {
     const id = Math.random().toString(36).slice(2)
@@ -56,10 +90,13 @@ export function AppStoreProvider({ children }) {
       timers.current.push(setTimeout(() => setStatus(tx.id, 'processing'), 2200))
       timers.current.push(setTimeout(() => setStatus(tx.id, 'completed'), 5600))
     } else {
-      api.getWallet().then(setWallet).catch(() => {})
+      // Le solde Bitnob est débité à l'initiation ; en sandbox la valeur
+      // disponible peut mettre quelques secondes à se recalculer → 2 passes.
+      refreshWallet()
+      timers.current.push(setTimeout(refreshWallet, 4000))
     }
     return tx
-  }, [])
+  }, [refreshWallet])
 
   const addBeneficiary = useCallback(async (input) => {
     const b = await api.createBeneficiary(input)
@@ -75,18 +112,25 @@ export function AppStoreProvider({ children }) {
   }, [])
 
   const stats = useMemo(() => {
-    const by = (st) => transfers.filter((t) => t.status === st)
+    const outbound = transfers.map((t) => ({ status: t.status, amount: t.amount, currency: t.sendCurrency }))
+    const inbound = deposits.map((d) => ({ status: d.status, amount: d.amount, currency: d.currency }))
+    const all = [...outbound, ...inbound]
+    const by = (st) => all.filter((x) => x.status === st)
+    const sum = (list) => list.filter((x) => x.status !== 'failed').reduce((a, x) => a + toUsd(x.amount, x.currency), 0)
     return {
-      volume: transfers.filter((t) => t.status !== 'failed').reduce((a, t) => a + t.amount, 0),
+      // Volume global (envois + reçus), en USD.
+      volume: sum(all),
+      sent: sum(outbound),
+      received: sum(inbound),
       completed: by('completed').length,
       pending: by('pending').length + by('processing').length,
       failed: by('failed').length,
     }
-  }, [transfers])
+  }, [transfers, deposits])
 
   const value = {
-    wallet, transfers, beneficiaries, loading, error, stats, toasts,
-    reload: load, toast, dismissToast, createTransfer, addBeneficiary, updateBeneficiary,
+    wallet, transfers, deposits, beneficiaries, loading, error, stats, toasts,
+    reload: load, refreshWallet, refreshDeposits, toast, dismissToast, createTransfer, addBeneficiary, updateBeneficiary,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

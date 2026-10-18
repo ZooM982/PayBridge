@@ -29,6 +29,7 @@ export const CURRENCIES = {
   ZAR: { symbol: 'R', decimals: 2 },
   // Canaux crypto (Addresses / Stablecoins) et Lightning (sats)
   USDT: { symbol: 'USDT', decimals: 2 },
+  USDC: { symbol: 'USDC', decimals: 2 },
   BTC: { symbol: 'BTC', decimals: 8 },
   SATS: { symbol: 'sats', decimals: 0 },
 }
@@ -36,7 +37,7 @@ export const CURRENCIES = {
 /** Taux indicatifs de démonstration (1 USD = x). Non contractuels. */
 export const DEMO_RATES_USD = {
   USD: 1, EUR: 0.92, XOF: 603.5, XAF: 603.5, NGN: 1548, GHS: 15.4, KES: 129.2, ZAR: 18.1,
-  USDT: 1, BTC: 0.00001639, SATS: 1639,
+  USDT: 1, USDC: 1, BTC: 0.00001639, SATS: 1639,
 }
 
 /** Grille de frais de démonstration : 0,9 % + 0,50 USD équivalent. */
@@ -88,6 +89,25 @@ export const DEMO_USER = {
 export const DEMO_WALLET = { balanceUsd: 12480.35, currency: 'USD' }
 
 export const DEMO_BENEFICIARIES = [
+  {
+    id: 'b-juste-amour',
+    name: 'Juste Amour',
+    country: 'SN',
+    method: 'crypto',
+    provider: 'Ethereum (ETH / USDT / USDC)',
+    account: '0xfAdDa20521808899C8e96C98a57813bC4EDE124F',
+    channels: [
+      {
+        id: 'c-juste-eth',
+        kind: 'crypto',
+        isDefault: true,
+        asset: 'USDT',
+        chain: 'ETHEREUM',
+        label: 'ETH · 0xfAdDa2...124F',
+        account: '0xfAdDa20521808899C8e96C98a57813bC4EDE124F',
+      },
+    ],
+  },
   {
     id: 'b1', name: 'Kwame Mensah', country: 'GH', method: 'mobile', provider: 'MTN MoMo', account: '+233 24 ••• 4412',
     channels: [

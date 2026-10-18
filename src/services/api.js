@@ -36,6 +36,38 @@ import { channelsOf, channelTitle, channelAccount, cryptoReceived } from '../lib
 const API = import.meta.env.VITE_API_URL ?? '/api'
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/** Dépôts simulés (mode démo) — miroir du contrat de GET /api/deposits. */
+const DEMO_DEPOSITS = [
+  {
+    id: 'RCV_USDC_demo1',
+    reference: 'RCV_USDC_demo1',
+    direction: 'in',
+    amount: 2,
+    currency: 'USDC',
+    status: 'completed',
+    type: 'DEPOSIT_CONFIRMED',
+    chain: 'ethereum',
+    address: '0x958858853C8B42466DDbb9B8a0e67Def9FB4B5Ed',
+    txHash: 'oc_89dd214231f359af962da8c4f0063b28c6bd352312b33a06b2cfe34b528b9b4f',
+    source: 'bitnob',
+    createdAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
+  },
+  {
+    id: 'RCV_USDC_demo2',
+    reference: 'RCV_USDC_demo2',
+    direction: 'in',
+    amount: 1,
+    currency: 'USDC',
+    status: 'completed',
+    type: 'DEPOSIT_CONFIRMED',
+    chain: 'polygon',
+    address: '0x28f9382F53410D846a6130a8578BaB92e30EaE33',
+    txHash: 'oc_bec86d8929cd85b4f03ae2b988d9d1ee55746d250c0e06ef1944c66ee8939b06',
+    source: 'bitnob',
+    createdAt: new Date(Date.now() - 26 * 3600_000).toISOString(),
+  },
+]
+
 async function http(path, opts = {}) {
   const res = await fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -48,6 +80,11 @@ async function http(path, opts = {}) {
 }
 
 export const api = {
+  /** Vérifie l'état de la connexion Bitnob Sandbox via Render */
+  async getWhoami() {
+    return http('/bitnob/whoami')
+  },
+
   /** Client Bitnob. Un compte virtuel NGN exige ensuite un BVN nigérian valide. */
   async createCustomer(input) {
     if (IS_DEMO) throw new Error('Les clients Bitnob sont disponibles en mode API uniquement.')
@@ -97,6 +134,13 @@ export const api = {
     const tx = DEMO_TRANSACTIONS.find((t) => t.id === id)
     if (!tx) throw new Error('Transfert introuvable.')
     return structuredClone(tx)
+  },
+
+  /** Opérations REÇUES : dépôts on-chain (Bitnob) + comptes virtuels NGN. */
+  async getDeposits() {
+    if (!IS_DEMO) return http('/deposits')
+    await wait(550)
+    return structuredClone(DEMO_DEPOSITS)
   },
 
   async getBeneficiaries() {
@@ -209,14 +253,35 @@ export const api = {
   },
 
   /**
-   * Adresse de dépôt on-chain pour recevoir du crypto.
-   * chain : 'BTC' | 'USDT' | 'USDC'
+   * Adresses de dépôt on-chain disponibles (une par réseau).
+   * → { addresses: [{ chain, address, label }], chains: string[], source }
+   * L'appel sans `chain` renvoie la liste complète, ce qui évite d'exposer des
+   * réseaux non provisionnés dans le sélecteur du front.
    */
-  async getDepositAddress({ chain = 'BTC' } = {}) {
-    if (!IS_DEMO) return http(`/addresses/deposit?chain=${chain}`)
+  async getDepositAddresses() {
+    if (!IS_DEMO) return http('/addresses/deposit')
     await wait(300)
-    const SIM = { BTC: '1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf6', USDT: 'TN3W4H6rK2ce4vX9YnFQHwKENnHjoxb3m8', USDC: '0x742d35Cc6634C0532925a3b844Bc454e7595f89' }
-    return { address: SIM[chain] ?? SIM.BTC, chain, source: 'demo' }
+    return {
+      source: 'demo',
+      chains: ['bitcoin', 'ethereum', 'polygon'],
+      addresses: [
+        { chain: 'bitcoin', address: '1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf6', label: 'BTC' },
+        { chain: 'ethereum', address: '0x742d35Cc6634C0532925a3b844Bc454e7595f89', label: 'USDC' },
+        { chain: 'polygon', address: '0x28f9382F53410D846a6130a8578BaB92e30EaE33', label: 'USDT' },
+      ],
+    }
+  },
+
+  /**
+   * Adresse de dépôt on-chain pour recevoir du crypto.
+   * chain : réseau Bitnob ('bitcoin' | 'ethereum' | 'polygon' | 'avalanche'…)
+   * ou un alias actif ('BTC' | 'USDT' | 'USDC').
+   */
+  async getDepositAddress({ chain = 'ethereum' } = {}) {
+    if (!IS_DEMO) return http(`/addresses/deposit?chain=${encodeURIComponent(chain)}`)
+    const { addresses } = await api.getDepositAddresses()
+    const match = addresses.find((a) => a.chain === chain) ?? addresses[0]
+    return { ...match, source: 'demo' }
   },
 
   /** Taux du jour : { updatedAt, rates: { USD: 1, NGN: 1548, … } }. */
