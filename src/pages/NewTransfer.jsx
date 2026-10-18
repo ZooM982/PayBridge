@@ -215,12 +215,11 @@ export default function NewTransfer() {
   const selectedWallet = wallets.find((w) => w.currency === form.sendCurrency) ?? wallets[0] ?? null
   const sendRate = DEMO_RATES_USD[form.sendCurrency] ?? 1
   const amountUsd = (Number(form.amount) || 0) / sendRate
-  const MIN_SATS = 5000
-  const MIN_BTC = MIN_SATS / 1e8   // 0,00005000 BTC
+  const MIN_BTC = 0.00001639
   const errors = {
     amount: !(Number(form.amount) > 0) ? 'Saisissez un montant.'
       : amountUsd < 1 ? `Montant minimum : ${money(1 * sendRate, form.sendCurrency)}`
-      : recvCurrency === 'BTC' && q.received < MIN_BTC ? `Montant minimum BTC : ${MIN_BTC.toFixed(8)} BTC (${MIN_SATS.toLocaleString('fr-FR')} sats)`
+      : recvCurrency === 'BTC' && q.received < MIN_BTC ? `Montant minimum BTC : ${MIN_BTC.toFixed(8)} BTC`
       : !sandboxFunding && selectedWallet && Number(form.amount) > selectedWallet.balance ? `Solde insuffisant — ${money(selectedWallet.balance, selectedWallet.currency)} disponibles.` : null,
     beneficiaryId: !form.beneficiaryId ? 'Choisissez un bénéficiaire.' : null,
     channelId: form.beneficiaryId && !channel ? 'Choisissez un canal de réception.'
