@@ -21,6 +21,27 @@ import {
 
 const RECEIVERS = COUNTRIES.filter((c) => !['FR', 'US'].includes(c.code))
 const CRYPTO_CHAINS = ['TRON', 'ETHEREUM', 'BITCOIN']
+/** Opérateurs mobile money proposés (doit rester synchrone avec le <Select>). */
+const MOBILE_PROVIDERS = ['Wave', 'Orange Money', 'MTN MoMo', 'M-Pesa']
+/** Canal mobile neuf : l'opérateur par défaut est posé DANS l'état.
+ *  Sinon `build.label` reste `undefined` alors que le <Select> affiche « Wave » :
+ *  l'Account Lookup partait avec un `bankCode` vide et le backend répondait 400. */
+const newMobileBuild = () => ({ kind: 'mobile', label: MOBILE_PROVIDERS[0] })
+/** Code opérateur/banque envoyé au lookup — jamais vide, le backend l'exige. */
+const bankCodeOf = (value, fallback) => {
+  const code = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '_')
+  return code || fallback
+}
+/** L'Account Lookup Bitnob n'est exposé que sur certains corridors (NG/GH) : ailleurs
+ *  l'API renvoie une erreur de validation. On l'explique au lieu d'afficher la
+ *  réponse brute de Bitnob — le canal reste ajoutable sans vérification. */
+const lookupMessage = (err, country) => {
+  const raw = String(err?.message ?? '')
+  if (/unable to verify|validation|not supported|not found/i.test(raw) || !raw) {
+    return `Vérification du titulaire non disponible pour ce corridor (${country}). Vous pouvez ajouter le canal sans vérification.`
+  }
+  return raw
+}
 
 const KIND_ICON = { mobile: Smartphone, bank: Landmark, crypto: Bitcoin, lightning: Zap }
 
@@ -69,7 +90,7 @@ function ChannelBuilder({ build, set, banks, check, setCheck }) {
     <div className="grid gap-2">
       <Field label="Opérateur" htmlFor="chp">
         <Select id="chp" value={build.label ?? ''} onChange={(e) => set({ ...build, label: e.target.value })}>
-          {['Wave', 'Orange Money', 'MTN MoMo', 'M-Pesa'].map((p) => <option key={p}>{p}</option>)}
+          {MOBILE_PROVIDERS.map((p) => <option key={p}>{p}</option>)}
         </Select>
       </Field>
       <Field label="Numéro de téléphone" htmlFor="cha" hint="Format international ex. +221 77 000 00 00">
@@ -146,7 +167,7 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
   const [name, setName] = useState('')
   const [ctry, setCtry] = useState('SN')
   const [channels, setChannels] = useState([])
-  const [build, setBuild] = useState({ kind: 'mobile' })
+  const [build, setBuild] = useState(newMobileBuild)
   const [banks, setBanks] = useState([])
   const [check, setCheck] = useState({ state: 'idle', holder: null, message: null, onVerify: () => {} })
   const [paste, setPaste] = useState('')
@@ -159,7 +180,7 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
     setName(beneficiary?.name ?? '')
     setCtry(beneficiary?.country ?? defaultCountry ?? 'SN')
     setChannels(beneficiary ? [...channelsOf(beneficiary)] : [])
-    setBuild({ kind: 'mobile' })
+    setBuild(newMobileBuild())
     setPasted(null)
     setPaste('')
     setCheck({ state: 'idle', holder: null, message: null, onVerify: () => {} })
@@ -174,10 +195,10 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
   const verifyChannel = () => {
     setCheck({ state: 'loading' })
     const task = build.kind === 'mobile'
-      ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: String(build.label ?? '').toUpperCase().replace(/\s+/g, '_'), method: 'mobile' })
+      ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: bankCodeOf(build.label, 'MOBILE_MONEY'), method: 'mobile' })
         .then((r) => ({ holder: `Titulaire : ${r.accountName}` }))
       : build.kind === 'bank'
-        ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: build.bankCode, method: 'bank' })
+        ? api.lookupAccount({ country: ctry, accountNumber: build.account, bankCode: bankCodeOf(build.bankCode, 'DEFAULT'), method: 'bank' })
           .then((r) => ({ holder: `Titulaire : ${r.accountName}` }))
         : build.kind === 'crypto'
           ? api.validateAddress({ address: build.account, chain: (build.chain ?? 'TRON').toLowerCase() })
@@ -186,7 +207,12 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
             .then((r) => ({ holder: r.isExpired ? 'Facture expirée' : `${r.amountSat.toLocaleString('fr-FR')} sats · ${r.description}` }))
     task
       .then((r) => setCheck({ state: r.holder ? 'verified' : 'error', holder: r.holder, message: r.holder ? null : 'Aucun canal valide côté rail de paiement.', onVerify: verifyChannel }))
-      .catch((e) => setCheck({ state: 'error', holder: null, message: e.message, onVerify: verifyChannel }))
+      .catch((e) => setCheck({
+        state: 'error',
+        holder: null,
+        message: build.kind === 'mobile' || build.kind === 'bank' ? lookupMessage(e, ctry) : e.message,
+        onVerify: verifyChannel,
+      }))
   }
   const setBuildSafe = (next) => { setBuild(next); setCheck({ state: 'idle', onVerify: verifyChannel }) }
 
@@ -195,7 +221,7 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
     if (err) { setCheck({ state: 'error', holder: null, message: err, onVerify: verifyChannel }); return }
     const ch = { id: `tmp-${Date.now()}`, ...build, isDefault: channels.length === 0 }
     setChannels((s) => [...s, ch])
-    setBuild({ kind: 'mobile' })
+    setBuild(newMobileBuild())
     setCheck({ state: 'idle', onVerify: verifyChannel })
   }
 
