@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { QRCode } from 'qrcode'
+import QRCode from 'qrcode'
+import { gsap } from 'gsap'
 import {
   UserPlus, Search, Send, Smartphone, Landmark, Users, BadgeCheck, QrCode, Pencil, Trash2, Zap, Bitcoin, Copy, ScanLine, X,
 } from 'lucide-react'
@@ -42,6 +44,14 @@ const NETWORK_ALIASES = {
  *  Sinon `build.label` reste `undefined` alors que le <Select> affiche la 1re option :
  *  l'Account Lookup partait avec un `bankCode` vide et le backend répondait 400. */
 const newMobileBuild = () => ({ kind: 'mobile', label: FALLBACK_NETWORKS[0] })
+/** Actif par défaut d'un réseau (Bitnob : USDT sur TRON/ETHEREUM, BTC sur Bitcoin). */
+const CRYPTO_ASSET_OF = { TRON: 'USDT', ETHEREUM: 'USDT', BITCOIN: 'BTC' }
+/** Canal crypto neuf : réseau ET actif posés dans l'état. Même piège que côté
+ *  mobile : le <Select> affichait « TRON » alors que `build.chain` restait vide,
+ *  et le backend refuse un canal crypto sans chaîne/actif. */
+const newCryptoBuild = () => ({ kind: 'crypto', chain: CRYPTO_CHAINS[0], asset: CRYPTO_ASSET_OF[CRYPTO_CHAINS[0]] })
+/** État initial de l'éditeur selon le type de canal sélectionné. */
+const buildFor = (kind) => (kind === 'mobile' ? newMobileBuild() : kind === 'crypto' ? newCryptoBuild() : { kind })
 /** Code opérateur/banque envoyé au lookup — jamais vide, le backend l'exige. */
 const bankCodeOf = (value, fallback) => {
   const code = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '_')
@@ -77,6 +87,44 @@ function ChannelChip({ ch, defaultBadge }) {
 }
 
 /** Partage QR : encode le bénéficiaire + ses canaux en payload PBA1. */
+function QrModal({ open, onClose, title, children }) {
+  const panel = useRef()
+  const overlay = useRef()
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useEffect(() => {
+    if (!open) return
+    const tl = gsap.timeline()
+    tl.fromTo(overlay.current, { opacity: 0 }, { opacity: 1, duration: 0.2 })
+      .fromTo(panel.current, { opacity: 0, y: 24, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.35, ease: 'expo.out' }, 0)
+    const onKey = (e) => e.key === 'Escape' && closeRef.current()
+    window.addEventListener('keydown', onKey)
+    return () => { tl.kill(); window.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  if (!open) return null
+  return createPortal(
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
+      <div ref={overlay} onClick={onClose} className="absolute inset-0 bg-night/90 backdrop-blur-[3px]" />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center sm:p-6 lg:pl-[260px]">
+        <div ref={panel} className="pointer-events-auto relative flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white sm:rounded-3xl shadow-[var(--shadow-card)]">
+          <div className="flex shrink-0 items-center justify-between border-b border-line bg-white px-6 py-5">
+            <h2 className="text-[17px] font-semibold">{title}</h2>
+            <button onClick={onClose} aria-label="Fermer" className="grid size-9 place-items-center rounded-xl text-ink-mute hover:bg-mist hover:text-ink">
+              <X className="size-5" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function QrShareDrawer({ open, onClose, beneficiary }) {
   const { toast } = useStore()
   const [src, setSrc] = useState(null)
@@ -87,8 +135,7 @@ function QrShareDrawer({ open, onClose, beneficiary }) {
       .then(setSrc).catch(() => setSrc(null))
   }, [open, payload])
   return (
-    <Drawer open={open} onClose={onClose} title="Partager par QR"
-      footer={<Button className="w-full" icon={Copy} onClick={() => { navigator.clipboard?.writeText(payload); toast({ title: 'Payload copié', text: 'Collez-le sur un autre appareil.', tone: 'info' }) }}>Copier le payload</Button>}>
+    <QrModal open={open} onClose={onClose} title="Partager par QR">
       <div className="flex flex-col items-center text-center">
         <Avatar name={beneficiary?.name ?? ''} size="lg" />
         <p className="mt-3 font-semibold">{beneficiary?.name}</p>
@@ -96,8 +143,11 @@ function QrShareDrawer({ open, onClose, beneficiary }) {
         <div className="mt-5 rounded-2xl bg-white p-4 shadow-[var(--shadow-card)]">
           {src ? <img src={src} alt="QR du bénéficiaire" className="size-56 rounded-xl" /> : <div className="grid size-56 place-items-center rounded-xl bg-mist text-[12px] text-ink-mute">Génération…</div>}
         </div>
+        <div className="mt-6 w-full">
+          <Button className="w-full" icon={Copy} onClick={() => { navigator.clipboard?.writeText(payload); toast({ title: 'Payload copié', text: 'Collez-le sur un autre appareil.', tone: 'info' }) }}>Copier le payload</Button>
+        </div>
       </div>
-    </Drawer>
+    </QrModal>
   )
 }
 
@@ -262,9 +312,15 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
   const setBuildSafe = (next) => { setBuild(next); setCheck({ state: 'idle', onVerify: verifyChannel }) }
 
   const addChannel = () => {
-    const err = channelError(build)
-    if (err) { setCheck({ state: 'error', holder: null, message: err, onVerify: verifyChannel }); return }
     const ch = { id: `tmp-${Date.now()}`, ...build, isDefault: channels.length === 0 }
+    // Le backend exige le réseau et l'actif d'un canal crypto : on les pose
+    // systématiquement (canal importé, ou éditeur quitté sans toucher au <Select>).
+    if (ch.kind === 'crypto') {
+      ch.chain = ch.chain ?? CRYPTO_CHAINS[0]
+      ch.asset = ch.asset ?? CRYPTO_ASSET_OF[ch.chain] ?? 'USDT'
+    }
+    const err = channelError(ch)
+    if (err) { setCheck({ state: 'error', holder: null, message: err, onVerify: verifyChannel }); return }
     setChannels((s) => [...s, ch])
     setBuild(newMobileBuild())
     setCheck({ state: 'idle', onVerify: verifyChannel })
@@ -298,15 +354,23 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
     setSaving(true)
     try {
       const first = channels[0]
+      const cryptoChannel = channels.find((c) => c.kind === 'crypto')
       const base = {
         name: (name || beneficiary?.name).trim(),
         country: ctry,
         channels,
-        // champs de compat (histoires/profil) dérivés du canal par défaut
+        // champs de compat (histoires/profil) dérivés du canal par défaut —
+        // `account` doit être la valeur COMPLÈTE : `channelAccount()` la masque
+        // pour l'affichage, or le backend la stocke et la réutilise.
         method: first.kind,
         provider: channelTitle(first),
-        account: channelAccount(first),
+        account: first.account ?? '',
         ...(first.bankCode ? { bankCode: first.bankCode } : {}),
+        // Pour un bénéficiaire crypto, Bitnob exige aussi l'actif et le réseau au
+        // niveau du bénéficiaire (les porter dans `channels` ne suffit pas → 400
+        // « asset et chain sont requis pour un bénéficiaire crypto »). On les
+        // reprend du 1er canal crypto, quel que soit le canal par défaut.
+        ...(cryptoChannel ? { asset: cryptoChannel.asset ?? 'USDT', chain: cryptoChannel.chain ?? CRYPTO_CHAINS[0] } : {}),
       }
       const b = editing ? await updateBeneficiary(beneficiary.id, { ...beneficiary, ...base }) : await addBeneficiary(base)
       setSaving(false); onClose()
@@ -369,7 +433,7 @@ function AddDrawer({ open, onClose, defaultCountry, beneficiary }) {
         <div className="rounded-2xl border border-line p-3">
           <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Type de canal">
             {Object.entries(CHANNEL_KINDS).map(([k, m]) => (
-              <button key={k} role="radio" aria-checked={build.kind === k} onClick={() => setBuildSafe({ kind: k })}
+              <button key={k} role="radio" aria-checked={build.kind === k} onClick={() => setBuildSafe(buildFor(k))}
                 className={cn('flex items-center gap-2 rounded-xl border p-2.5 text-[13px] font-semibold transition-all',
                   build.kind === k ? 'border-volt bg-volt-50/60 ring-4 ring-volt/10' : 'border-line hover:border-ink-mute')}>
                 {(() => { const Icon = KIND_ICON[k]; return <Icon className="size-4" /> })()}{m.label}

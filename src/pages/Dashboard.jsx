@@ -137,7 +137,7 @@ export default function Dashboard() {
     </Card>
   )
 
-  const firstName = DEMO_USER.name.split(' ')[0]
+  const firstName = DEMO_USER.name
   return (
     <div ref={scope}>
       <PageHeader eyebrow="Samedi 17 octobre" title={`Bonjour, ${firstName} 👋`} subtitle="Voici l'activité de vos paiements transfrontaliers." />

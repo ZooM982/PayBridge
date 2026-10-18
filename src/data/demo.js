@@ -80,9 +80,9 @@ export function demoHolder(accountNumber = '') {
 }
 
 export const DEMO_USER = {
-  name: 'Awa Diallo',
-  business: 'Studio Diallo (démo)',
-  email: 'awa@demo.paybridge.africa',
+  name: 'The Outsiders',
+  business: 'The Outsiders (démo)',
+  email: 'to@demo.paybridge.africa',
   country: 'SN',
 }
 

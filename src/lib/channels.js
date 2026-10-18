@@ -62,6 +62,7 @@ export function channelError(c = {}) {
       return 'Adresse crypto invalide (formats : T…, 0x…, bc1…).'
     }
     if (!c.chain) return 'Choisissez un réseau.'
+    if (!c.asset) return 'Choisissez l’actif du canal (USDT ou BTC).'
     return null
   }
   if (c.kind === 'lightning') {

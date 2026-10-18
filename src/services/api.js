@@ -280,6 +280,21 @@ function normalizeRates(raw = {}) {
   return { ...raw, rates }
 }
 
+/**
+ * Banques d'un corridor. La config pays de Bitnob (destination_types.bank.banks)
+ * est la source canonique ; l'ancienne route /banks/:country ne sert que de repli
+ * et beaucoup de corridors n'ont aucune banque (mobile money uniquement) : on
+ * renvoie alors une liste vide plutôt qu'une erreur.
+ */
+async function banksOf(countryCode) {
+  const req = await http(`/payouts/supported-countries/${encodeURIComponent(countryCode)}`).catch(() => null)
+  // Réponse canonique obtenue : elle fait foi, même sans banque (corridor mobile
+  // money uniquement) — inutile d'aller chercher l'ancienne route en 404.
+  if (req) return { banks: req?.destination_types?.bank?.banks ?? [] }
+  const legacy = await http(`/banks/${countryCode}`).catch(() => null)
+  return { banks: legacy?.banks ?? [] }
+}
+
 export const api = {
   /** Vérifie l'état de la connexion Bitnob Sandbox via Render */
   async getWhoami() {
@@ -506,7 +521,7 @@ export const api = {
 
   /** Liste des banques d'un pays (choisissez un code dans le champ bankCode des bénéficiaires). */
   async getBanks(countryCode) {
-    if (!IS_DEMO) return http(`/banks/${countryCode}`)
+    if (!IS_DEMO) return banksOf(countryCode)
     await wait(200)
     return { banks: DEMO_BANKS[countryCode] ?? DEMO_BANKS_FALLBACK }
   },

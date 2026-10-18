@@ -13,7 +13,7 @@ import { DEMO_USER, IS_DEMO } from '../../data/demo'
 import { cn } from '../../lib/format'
 
 export const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/transferts', label: 'Transferts', icon: Send },
   { to: '/beneficiaires', label: 'Bénéficiaires', icon: Users },
   { to: '/historique', label: 'Historique', icon: History },
