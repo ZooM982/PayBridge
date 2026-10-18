@@ -7,7 +7,9 @@ export function Skeleton({ className }) {
 
 const tints = ['bg-[#E6FBF3] text-[#00875A]', 'bg-[#EBF2FE] text-[#2563EB]', 'bg-[#FEF6E7] text-[#B7770F]', 'bg-[#F3EEFE] text-[#7C3AED]', 'bg-[#FDECEE] text-[#D9364A]']
 export function Avatar({ name, size = 'md', className }) {
-  const t = tints[name.charCodeAt(0) % tints.length]
+  // `name` peut être absent (bénéficiaire non résolu) → teinte neutre plutôt qu'un crash.
+  const label = String(name ?? '').trim()
+  const t = label ? tints[label.charCodeAt(0) % tints.length] : 'bg-mist text-ink-mute'
   return (
     <span className={cn('inline-grid shrink-0 place-items-center rounded-full font-semibold', t,
       size === 'sm' ? 'size-8 text-[11px]' : size === 'lg' ? 'size-12 text-[15px]' : 'size-10 text-[13px]', className)}>
@@ -36,8 +38,11 @@ export function EmptyState({ icon: Icon, title, text, action }) {
 }
 
 export function Flag({ code, className }) {
-  // Emoji drapeau, fallback lisible : code ISO
-  const flag = code.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt()))
+  // Emoji drapeau, fallback lisible : code ISO. Un code absent (corridor non résolu)
+  // est simplement masqué pour ne pas casser la ligne.
+  const iso = String(code ?? '').trim().toUpperCase()
+  if (!/^[A-Z]{2}$/.test(iso)) return null
+  const flag = iso.replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt()))
   return <span aria-hidden className={cn('text-[18px] leading-none', className)}>{flag}</span>
 }
 

@@ -46,6 +46,8 @@ export function quote({ amount, sendCurrency = 'USD', receiveCurrency = 'USD' })
 
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d
 
-export const initials = (name) => name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase()
+/** Initiales d'un nom ; tolère `null`/`undefined` (bénéficiaire inconnu). */
+export const initials = (name) =>
+  String(name ?? '').trim().split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '·'
 
 export const cn = (...c) => c.filter(Boolean).join(' ')

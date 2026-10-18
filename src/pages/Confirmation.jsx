@@ -91,10 +91,10 @@ export default function Confirmation() {
 
         <div className="border-t border-line px-6 py-6 sm:px-10" data-reveal>
           <div className="flex items-center gap-3">
-            <Avatar name={tx.beneficiaryName} />
+            <Avatar name={tx.beneficiaryName ?? tx.beneficiary?.name} />
             <div className="min-w-0 flex-1">
-              <p className="font-semibold">{tx.beneficiaryName}</p>
-              <p className="text-[13px] text-ink-mute"><Flag code={tx.toCountry} className="text-[14px]" /> {country(tx.toCountry).name} · {tx.provider}</p>
+              <p className="font-semibold">{tx.beneficiaryName ?? tx.beneficiary?.name ?? 'Transfert'}</p>
+              <p className="text-[13px] text-ink-mute"><Flag code={tx.toCountry} className="text-[14px]" /> {country(tx.toCountry)?.name ?? tx.toCountry ?? '—'} · {tx.provider ?? '—'}</p>
             </div>
           </div>
           <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">

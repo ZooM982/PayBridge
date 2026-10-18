@@ -103,7 +103,7 @@ function SummaryPanel({ q, form, beneficiary, ch, step }) {
         </div>
 
         <div className="rounded-2xl bg-volt p-4 text-night">
-          <p className="flex items-center gap-1.5 text-[12px] font-semibold text-night/60"><Icon className="size-3.5" />{beneficiary ? `${beneficiary.name.split(' ')[0]} reçoit` : 'Le bénéficiaire reçoit'}</p>
+          <p className="flex items-center gap-1.5 text-[12px] font-semibold text-night/60"><Icon className="size-3.5" />{beneficiary?.name ? `${beneficiary.name.split(' ')[0]} reçoit` : 'Le bénéficiaire reçoit'}</p>
           <p ref={recvRef} className="tabular mt-0.5 text-[26px] font-bold tracking-tight">{money(q.received, recv)}</p>
         </div>
 

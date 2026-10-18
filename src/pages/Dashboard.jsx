@@ -197,7 +197,7 @@ export default function Dashboard() {
                 <div className="relative transition-transform group-hover:-translate-y-0.5">
                   <Avatar name={b.name} size="lg" /><Flag code={b.country} className="absolute -bottom-1 -right-1 text-[15px]" />
                 </div>
-                <span className="w-full truncate text-center text-[12px] font-medium">{b.name.split(' ')[0]}</span>
+                <span className="w-full truncate text-center text-[12px] font-medium">{(b.name ?? '').split(' ')[0] || '—'}</span>
               </button>
             ) : <Skeleton key={i} className="mx-auto size-12 rounded-full" />)}
           </div>

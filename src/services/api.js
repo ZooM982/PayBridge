@@ -113,6 +113,23 @@ async function http(path, opts = {}) {
   return res.json()
 }
 
+/** Recomplate un transfert avec les infos de son bénéficiaire quand le backend
+ *  ne les a pas incluses (nom, pays, opérateur) — évite les lignes vides en UI. */
+function attachBeneficiaries(transfers, beneficiaries = []) {
+  if (!Array.isArray(transfers)) return []
+  const byId = new Map((beneficiaries ?? []).map((b) => [b.id, b]))
+  return transfers.map((t) => {
+    const b = t.beneficiaryId ? byId.get(t.beneficiaryId) : null
+    if (!b) return t
+    return {
+      ...t,
+      beneficiaryName: t.beneficiaryName ?? b.name ?? null,
+      toCountry: t.toCountry ?? b.country ?? null,
+      provider: t.provider ?? b.provider ?? null,
+    }
+  })
+}
+
 export const api = {
   /** Vérifie l'état de la connexion Bitnob Sandbox via Render */
   async getWhoami() {
@@ -152,7 +169,15 @@ export const api = {
   },
 
   async getTransfers() {
-    if (!IS_DEMO) return http('/transfers')
+    if (!IS_DEMO) {
+      // Certaines versions du backend renvoient des transferts sans nom/pays de
+      // bénéficiaire : on recomplète depuis /beneficiaries avant de rendre la main.
+      const [transfers, beneficiaries] = await Promise.all([
+        http('/transfers'),
+        http('/beneficiaries').catch(() => []),
+      ])
+      return attachBeneficiaries(transfers, beneficiaries)
+    }
     await wait(650)
     return structuredClone(DEMO_TRANSACTIONS)
   },

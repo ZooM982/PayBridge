@@ -155,8 +155,8 @@ export default function History() {
                             </div>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-3"><Avatar name={t.beneficiaryName} size="sm" />
-                            <div><p className="font-semibold">{t.beneficiaryName}</p><p className="text-[12px] text-ink-mute"><Flag code={t.toCountry} className="text-[13px]" /> {country(t.toCountry)?.name}</p></div>
+                          <div className="flex items-center gap-3"><Avatar name={t.beneficiaryName ?? t.beneficiary?.name} size="sm" />
+                            <div><p className="font-semibold">{t.beneficiaryName ?? t.beneficiary?.name ?? 'Transfert'}</p><p className="text-[12px] text-ink-mute"><Flag code={t.toCountry} className="text-[13px]" /> {country(t.toCountry)?.name ?? t.toCountry ?? '—'}</p></div>
                           </div>
                         )}
                       </td>

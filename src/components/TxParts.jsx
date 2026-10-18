@@ -14,6 +14,7 @@ const chainLabel = (chain) => (chain ? chain.charAt(0).toUpperCase() + chain.sli
 export function TxRow({ tx, onClick }) {
   const inbound = tx.direction === 'in'
   const c = country(tx.toCountry)
+  const who = tx.beneficiaryName ?? tx.beneficiary?.name ?? null
   const clickable = Boolean(onClick) && !inbound
   const Wrapper = clickable ? 'button' : 'div'
 
@@ -32,19 +33,19 @@ export function TxRow({ tx, onClick }) {
           </span>
         ) : (
           <>
-            <Avatar name={tx.beneficiaryName} />
+            <Avatar name={who} />
             <Flag code={tx.toCountry} className="absolute -bottom-1 -right-1 text-[14px]" />
           </>
         )}
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-semibold text-ink">
-          {inbound ? `Reçu · ${tx.currency || 'Dépôt'}` : tx.beneficiaryName}
+          {inbound ? `Reçu · ${tx.currency || 'Dépôt'}` : (who ?? 'Transfert')}
         </p>
         <p className="truncate text-[12px] text-ink-mute">
           {inbound
             ? `${chainLabel(tx.chain) ?? 'Compte virtuel'} · ${date(tx.createdAt, true)}`
-            : `${c?.name} · ${tx.provider} · ${date(tx.createdAt, true)}`}
+            : [c?.name ?? tx.toCountry, tx.provider].filter(Boolean).join(' · ') + ` · ${date(tx.createdAt, true)}`}
         </p>
       </div>
       <div className="text-right">
