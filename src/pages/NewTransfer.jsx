@@ -14,7 +14,7 @@ import { Field, Select, Input } from '../components/ui/Field'
 import { Avatar, DemoTag, Flag, PoweredBy } from '../components/ui/Misc'
 import { PayInvoice } from '../components/ui/PayInvoice'
 import { PageHeader } from '../components/layout/PageHeader'
-import { COUNTRIES, DEMO_RATES_USD, REASONS, REASON_LABELS } from '../data/demo'
+import { COUNTRIES, DEMO_RATES_USD, DEMO_FEES, REASONS, REASON_LABELS } from '../data/demo'
 import { money, quote, country, cn } from '../lib/format'
 import { channelsOf, channelTitle, channelAccount, CHANNEL_KINDS } from '../lib/channels'
 import { channelSupport, effectiveCryptoAsset } from '../lib/corridors'
@@ -194,8 +194,22 @@ export default function NewTransfer() {
   const q = useMemo(() => {
     if (fiat) return { ...qLocal, ...(qApi ?? {}), receiveCurrency: recvCurrency }
     const rate = channel?.kind === 'lightning' ? DEMO_RATES_USD.SATS : 1
-    return { ...qLocal, rate, received: round(qLocal.net * rate, DEC[recvCurrency] ?? 2), receiveCurrency: recvCurrency }
-  }, [fiat, qLocal, qApi, recvCurrency, channel?.kind])
+    const dec = DEC[recvCurrency] ?? 8
+    // qLocal.fee/net sont arrondis à 2 dp par quote() — insuffisant pour BTC (8 dp).
+    // On recalcule avec la précision requise par la devise envoyée.
+    const a = qLocal.amount
+    const sendRate = DEMO_RATES_USD[form.sendCurrency] ?? 1
+    const fee = a > 0 ? a * DEMO_FEES.percent + DEMO_FEES.fixedUsd * sendRate : 0
+    const net = Math.max(a - fee, 0)
+    return {
+      ...qLocal,
+      fee: round(fee, dec),
+      net: round(net, dec),
+      rate,
+      received: round(net * rate, dec),
+      receiveCurrency: recvCurrency,
+    }
+  }, [fiat, qLocal, qApi, recvCurrency, channel?.kind, form.sendCurrency])
 
   const wallets = wallet?.wallets ?? (wallet ? [{ currency: 'USD', balance: wallet.balance, label: 'Portefeuille USD' }] : [])
   const selectedWallet = wallets.find((w) => w.currency === form.sendCurrency) ?? wallets[0] ?? null

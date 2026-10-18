@@ -470,13 +470,13 @@ export const api = {
     }
   },
 
-  /** Payer une facture Lightning (BOLT11). */
-  async payLightningInvoice({ paymentRequest }) {
-    if (!IS_DEMO) return http('/lightning/pay', { method: 'POST', body: { paymentRequest } })
+  /** Payer une facture Lightning (BOLT11). `amountSat` requis pour les factures à montant libre. */
+  async payLightningInvoice({ paymentRequest, amountSat: overrideAmount }) {
+    if (!IS_DEMO) return http('/lightning/pay', { method: 'POST', body: { paymentRequest, ...(overrideAmount ? { amountSat: overrideAmount } : {}) } })
     await wait(1500)
     let h = 0
     for (const c of String(paymentRequest)) h = (h * 31 + c.charCodeAt(0)) % 9973
-    const amountSat = 12_000 + (h % 60) * 1_500
+    const amountSat = overrideAmount ?? (12_000 + (h % 60) * 1_500)
     return { id: `ln-pay-${Date.now()}`, status: 'completed', amountSat, feeSat: Math.round(amountSat * 0.001) }
   },
 

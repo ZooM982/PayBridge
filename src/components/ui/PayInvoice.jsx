@@ -113,10 +113,11 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
   const [paying, setPaying] = useState(false)
   const [done, setDone] = useState(null)
   const [error, setError] = useState(null)
+  const [customUsd, setCustomUsd] = useState('')
 
   const handleInput = async (value) => {
     const v = value.trim().replace(/^(bitcoin:|lightning:)/i, '')
-    setRaw(value); setError(null); setDecoded(null); setDone(null)
+    setRaw(value); setError(null); setDecoded(null); setDone(null); setCustomUsd('')
     const t = detectType(v)
     setType(t)
     if (t === 'lightning' && v.length > 20) {
@@ -136,10 +137,16 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
     } catch { setError('Impossible de lire le presse-papier.') }
   }
 
+  const SATS_PER_USD = DEMO_RATES_USD.SATS ?? 95_000
+  const freeAmount = decoded?.amountSat === 0
+  const customSat = freeAmount ? Math.round(Number(customUsd) * SATS_PER_USD) : 0
+
   const pay = async () => {
     setError(null); setPaying(true)
     try {
-      const res = await api.payLightningInvoice({ paymentRequest: raw.trim() })
+      const params = { paymentRequest: raw.trim() }
+      if (freeAmount && customSat > 0) params.amountSat = customSat
+      const res = await api.payLightningInvoice(params)
       setDone(res)
       setTimeout(() => onSuccess?.(res), 2000)
     } catch (e) { setError(e.message) }
@@ -147,7 +154,7 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
   }
 
   const meta = type ? TYPE_META[type] : null
-  const amountUsd = decoded?.amountSat ? decoded.amountSat / (DEMO_RATES_USD.SATS ?? 95_000) : null
+  const amountUsd = decoded?.amountSat ? decoded.amountSat / SATS_PER_USD : null
 
   if (done) return (
     <div className="flex flex-col items-center gap-4 py-6 text-center">
@@ -156,7 +163,7 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
         <p className="text-[17px] font-semibold">Paiement envoyé !</p>
         {done.amountSat > 0 && <p className="mt-1 text-[13px] text-ink-mute">{done.amountSat.toLocaleString('fr-FR')} sats · frais {done.feeSat} sats</p>}
       </div>
-      <button onClick={() => { setRaw(''); setType(null); setDecoded(null); setDone(null) }}
+      <button onClick={() => { setRaw(''); setType(null); setDecoded(null); setDone(null); setCustomUsd('') }}
         className="text-[13px] font-semibold text-volt-600 hover:underline">Nouveau paiement</button>
     </div>
   )
@@ -183,7 +190,7 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
               className="field w-full resize-none font-mono text-[12px] leading-relaxed pr-10"
             />
             {raw && (
-              <button onClick={() => { setRaw(''); setType(null); setDecoded(null); setError(null) }}
+              <button onClick={() => { setRaw(''); setType(null); setDecoded(null); setError(null); setCustomUsd('') }}
                 className="absolute right-2.5 top-2.5 grid size-6 place-items-center rounded-md text-ink-mute hover:bg-mist hover:text-ink">
                 <X className="size-3.5" />
               </button>
@@ -217,20 +224,45 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
 
         {/* Détails décodés (Lightning) */}
         {decoded && !decoded.isExpired && (
-          <div className="rounded-2xl border border-line divide-y divide-line text-[14px]">
-            {[
-              ['Montant', decoded.amountSat > 0 ? `${decoded.amountSat.toLocaleString('fr-FR')} sats (≈ ${money(amountUsd, 'USD')})` : 'Libre'],
-              ['Description', decoded.description || '—'],
-            ].map(([k, v]) => (
-              <div key={k} className="flex items-start justify-between gap-4 px-4 py-3">
-                <dt className="text-ink-soft shrink-0">{k}</dt>
-                <dd className="text-right font-medium">{v}</dd>
-              </div>
-            ))}
-            {selectedWallet && (
-              <div className="flex items-start justify-between gap-4 px-4 py-3">
-                <dt className="text-ink-soft shrink-0">Débité de</dt>
-                <dd className="text-right font-medium">{selectedWallet.label} · {money(selectedWallet.balance, selectedWallet.currency)}</dd>
+          <div className="flex flex-col gap-3">
+            <div className="rounded-2xl border border-line divide-y divide-line text-[14px]">
+              {[
+                ['Montant', decoded.amountSat > 0 ? `${decoded.amountSat.toLocaleString('fr-FR')} sats (≈ ${money(amountUsd, 'USD')})` : 'Libre — à saisir'],
+                ['Description', decoded.description || '—'],
+              ].map(([k, v]) => (
+                <div key={k} className="flex items-start justify-between gap-4 px-4 py-3">
+                  <dt className="text-ink-soft shrink-0">{k}</dt>
+                  <dd className="text-right font-medium">{v}</dd>
+                </div>
+              ))}
+              {selectedWallet && (
+                <div className="flex items-start justify-between gap-4 px-4 py-3">
+                  <dt className="text-ink-soft shrink-0">Débité de</dt>
+                  <dd className="text-right font-medium">{selectedWallet.label} · {money(selectedWallet.balance, selectedWallet.currency)}</dd>
+                </div>
+              )}
+            </div>
+
+            {/* Saisie du montant pour les factures à montant libre */}
+            {freeAmount && (
+              <div>
+                <label className="label mb-1.5 block">Montant à envoyer</label>
+                <div className={`flex h-14 items-center rounded-xl border bg-white transition-colors focus-within:ring-4
+                  ${!customUsd || customSat > 0 ? 'border-line focus-within:border-volt focus-within:ring-volt/15' : 'border-danger focus-within:ring-danger/15'}`}>
+                  <input
+                    inputMode="decimal"
+                    value={customUsd}
+                    onChange={(e) => setCustomUsd(e.target.value.replace(',', '.').replace(/[^\d.]/g, ''))}
+                    placeholder="0"
+                    className="tabular h-full min-w-0 flex-1 rounded-l-xl bg-transparent px-4 text-[22px] font-bold outline-none placeholder:text-ink-mute/40"
+                  />
+                  <span className="mr-4 text-[13px] font-semibold text-ink-soft">USD</span>
+                </div>
+                {customSat > 0 && (
+                  <p className="mt-1.5 text-[12px] text-ink-mute">
+                    ≈ {customSat.toLocaleString('fr-FR')} sats
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -252,8 +284,19 @@ export function PayInvoice({ selectedWallet, onSuccess }) {
 
         {/* Bouton payer */}
         {type === 'lightning' && decoded && !decoded.isExpired && (
-          <Button onClick={pay} loading={paying} icon={Zap} size="lg" className="w-full">
-            {paying ? 'Envoi en cours…' : `Payer ${decoded.amountSat > 0 ? `${decoded.amountSat.toLocaleString('fr-FR')} sats` : 'la facture'}`}
+          <Button
+            onClick={pay}
+            loading={paying}
+            icon={Zap}
+            size="lg"
+            className="w-full"
+            disabled={freeAmount && !(customSat > 0)}
+          >
+            {paying
+              ? 'Envoi en cours…'
+              : freeAmount
+                ? (customSat > 0 ? `Payer ${customSat.toLocaleString('fr-FR')} sats` : 'Saisissez un montant')
+                : `Payer ${decoded.amountSat.toLocaleString('fr-FR')} sats`}
           </Button>
         )}
       </div>
