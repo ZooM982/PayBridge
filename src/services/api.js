@@ -33,7 +33,7 @@ import {
 import { quote as localQuote, country } from '../lib/format'
 import { channelsOf, channelTitle, channelAccount, cryptoReceived } from '../lib/channels'
 
-const API = import.meta.env.VITE_API_URL ?? '/api'
+const API = import.meta.env.VITE_API_URL ?? 'https://paybridge-ilvu.onrender.com/api'
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /** Dépôts simulés (mode démo) — miroir du contrat de GET /api/deposits. */

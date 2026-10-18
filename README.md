@@ -76,7 +76,8 @@ cp .env.example .env # puis renseigner BITNOB_CLIENT_ID / BITNOB_CLIENT_SECRET
 
 1. Créer un compte sandbox sur **app.bitnob.com** → Settings > API Keys (Client ID + Secret).
 2. Copier `.env.example` en `.env` racine et passer `VITE_DATA_MODE=api`.
-3. Le proxy Vite redirige déjà `/api` vers `http://localhost:4001` en développement.
+3. Le front cible par défaut le backend **Render** (`VITE_API_URL=https://paybridge-ilvu.onrender.com/api`).
+   Pour développer hors-ligne avec le serveur local : `VITE_API_URL=http://localhost:4001/api` (le proxy Vite redirige alors `/api`).
 4. Statuts temps réel : le front consomme `GET /api/events` (SSE), alimenté par les
    **webhooks Bitnob** (`POST /api/webhooks/bitnob`) + un polling de secours toutes les 20 s.
 5. Flux payout côté serveur (dans `POST /api/transfers`) : `quotes → initialize → finalize`
